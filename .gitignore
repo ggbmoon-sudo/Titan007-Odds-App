@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Local runtime data
+.local-cache/
+*.log
+server.spawn.*.log
+
+# Secrets and local config
+.env
+.env.*
+*.local
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Downloaded/exported data
+*.jsonl
+*.csv

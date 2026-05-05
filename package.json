@@ -1,0 +1,13 @@
+{
+  "name": "titan007-odds-extractor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Extract Asian handicap, over/under, and 1x2 odds from Titan007 match pages.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

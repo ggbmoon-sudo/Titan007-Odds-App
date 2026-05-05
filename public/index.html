@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>賠率資料工作台</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-mark">OD</div>
+        <div>
+          <h1>賠率資料工作台</h1>
+          <p>Titan007 提取 · HKJC 掃描 · AI 分析</p>
+        </div>
+      </div>
+      <div class="status" id="status">準備就緒</div>
+    </header>
+
+    <main class="app-layout">
+      <aside class="control-panel">
+        <section class="tool-section">
+          <div class="section-heading">
+            <span>01</span>
+            <h2>賽事提取</h2>
+          </div>
+
+          <label>
+            聯賽搜尋
+            <input id="leagueInput" type="search" placeholder="例：英超、日職、智利女甲">
+          </label>
+
+          <div class="quick-row">
+            <label>
+              快速數量
+              <input id="quickLimitInput" type="number" min="1" max="25" value="5">
+            </label>
+            <button id="quickExtractBtn" class="primary" type="button">快速提取</button>
+          </div>
+
+          <button id="loadMatchesBtn" class="primary subtle-primary" type="button">載入賽事</button>
+
+          <label class="worker-control">
+            提取並行數
+            <select id="workerCountInput">
+              <option value="1">1 · 穩定</option>
+              <option value="2" selected>2 · 平衡</option>
+              <option value="3">3 · 快速</option>
+            </select>
+          </label>
+
+          <div class="compact-actions">
+            <button id="selectAllBtn" type="button" disabled>全選</button>
+            <button id="clearSelectionBtn" type="button" disabled>清除</button>
+            <button id="extractSelectedBtn" type="button" disabled>提取已選</button>
+            <button id="extractLoadedBtn" type="button" disabled>提取已載入</button>
+            <label class="wide-control">
+              掃概率時間段
+              <select id="probabilityWindowInput">
+                <option value="all" selected>全部已選/已載入</option>
+                <option value="0-4">未來4小時</option>
+                <option value="0-6">未來6小時</option>
+                <option value="6-12">6-12小時</option>
+                <option value="12-18">12-18小時</option>
+                <option value="0-24">未來24小時</option>
+              </select>
+            </label>
+            <button id="probabilityScanBtn" class="wide-action" type="button">掃概率80%</button>
+            <button id="extractHkjcSixHourBtn" class="wide-action" type="button">提取6小時HKJC</button>
+            <button id="extractHkjcTwelveHourBtn" class="wide-action" type="button">提取6-12小時HKJC</button>
+            <button id="extractHkjcEighteenHourBtn" class="wide-action" type="button">提取12-18小時HKJC</button>
+          </div>
+        </section>
+
+        <section class="tool-section">
+          <div class="section-heading">
+            <span>02</span>
+            <h2>HKJC 掃描</h2>
+          </div>
+          <div class="metric-line">
+            <span>範圍</span>
+            <strong>未來 24 小時</strong>
+          </div>
+          <button id="hkjcScanBtn" class="primary" type="button">掃描指定賠率</button>
+        </section>
+
+        <section class="tool-section ai-section">
+          <div class="section-heading">
+            <span>03</span>
+            <h2>AI 分析</h2>
+          </div>
+
+          <label>
+            API Base URL
+            <input id="aiBaseUrlInput" type="url" value="https://liangjiewis.com" spellcheck="false">
+          </label>
+
+          <label>
+            Model
+            <input id="aiModelInput" type="text" value="gemini-3.1-pro-preview-thinking" list="aiModelOptions" spellcheck="false">
+            <datalist id="aiModelOptions">
+              <option value="gemini-3.1-pro-preview-thinking"></option>
+              <option value="gemini-3.0-pro"></option>
+              <option value="gemini-3.0-flash"></option>
+              <option value="gemini-2.5-flash"></option>
+              <option value="gemini-2.5-pro"></option>
+              <option value="gemini-2.0-flash"></option>
+              <option value="gpt-5.5-high"></option>
+            </datalist>
+          </label>
+
+          <label>
+            API 格式
+            <select id="aiApiModeInput">
+              <option value="openai">OpenAI-compatible /v1/chat/completions</option>
+              <option value="gemini">Gemini 原生 /v1/models:generateContent</option>
+              <option value="gemini_bearer" selected>Gemini 原生 Bearer /v1beta/models:generateContent</option>
+            </select>
+          </label>
+
+          <div class="metric-line">
+            <span>Prompt 版本</span>
+            <strong id="promptVersionLabel">md-blueprint-v2</strong>
+          </div>
+
+          <label>
+            API Key
+            <input id="aiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">
+          </label>
+
+          <label class="check">
+            <input id="rememberKeyInput" type="checkbox" checked>
+            本機記住 API Key
+          </label>
+
+          <div class="ai-key-actions">
+            <button id="aiTestBtn" type="button">AI 測試</button>
+            <button id="saveAiKeyBtn" type="button">儲存 Key</button>
+            <button id="clearAiKeyBtn" type="button">清除 Key</button>
+          </div>
+
+          <div class="debug-lights" id="debugLights">
+            <div class="debug-light pending" id="debugKeyLight">
+              <span></span><strong>API Key</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugBaseLight">
+              <span></span><strong>Base URL</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugServerLight">
+              <span></span><strong>Server</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugTitanLight">
+              <span></span><strong>Titan007</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugGuideLight">
+              <span></span><strong>MD 框架</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugPromptLight">
+              <span></span><strong>Prompt</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugPayloadLight">
+              <span></span><strong>資料量</strong><em>未有</em>
+            </div>
+            <div class="debug-light pending" id="debugJsonLight">
+              <span></span><strong>JSON</strong><em>未有</em>
+            </div>
+            <div class="debug-light pending" id="debugTimeoutLight">
+              <span></span><strong>延遲</strong><em>未有</em>
+            </div>
+            <div class="debug-light pending" id="debugAiLight">
+              <span></span><strong>AI</strong><em>未測試</em>
+            </div>
+            <div class="debug-light pending" id="debugLastLight">
+              <span></span><strong>最後回應</strong><em>未有</em>
+            </div>
+          </div>
+
+          <label>
+            指定場次
+            <select id="aiTargetMatchSelect">
+              <option value="">選擇已提取 / 本地保存場次</option>
+            </select>
+            <input id="aiTargetMatchInput" type="text" inputmode="numeric" placeholder="Match ID / HKJC 賽事編號">
+          </label>
+
+          <button id="basicTop10Btn" type="button" disabled>AI 計 Top 10</button>
+          <button id="aiAnalyzeTargetBtn" class="primary" type="button" disabled>分析指定場次</button>
+          <button id="aiAnalyzeBtn" class="primary" type="button" disabled>AI 分析目前結果</button>
+          <button id="featuresDownloadBtn" type="button" disabled>下載 AI 輸入 JSON</button>
+          <button id="aiDownloadBtn" type="button" disabled>下載分析 MD</button>
+          <button id="aiJsonDownloadBtn" type="button" disabled>下載分析 JSON</button>
+        </section>
+
+        <section class="tool-section context-section">
+          <div class="section-heading">
+            <span>04</span>
+            <h2>外部資料 Context</h2>
+          </div>
+
+          <label>
+            API-Football Key
+            <input id="apiFootballKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="輸入 API-Football key">
+          </label>
+
+          <label class="check">
+            <input id="rememberApiFootballKeyInput" type="checkbox" checked>
+            本機記住 API-Football Key
+          </label>
+
+          <label class="check">
+            <input id="includeWeatherInput" type="checkbox" checked>
+            加入 Open-Meteo 天氣
+          </label>
+
+          <div class="ai-key-actions">
+            <button id="loadContextBtn" class="primary" type="button" disabled>補充 Context</button>
+            <button id="saveApiFootballKeyBtn" type="button">儲存 Key</button>
+            <button id="clearApiFootballKeyBtn" type="button">清除 Key</button>
+          </div>
+
+          <div class="debug-lights compact-debug">
+            <div class="debug-light pending" id="debugContextLight">
+              <span></span><strong>Context</strong><em>未有</em>
+            </div>
+            <div class="debug-light pending" id="debugApiFootballLight">
+              <span></span><strong>API-Football</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugWeatherLight">
+              <span></span><strong>Open-Meteo</strong><em>未有</em>
+            </div>
+          </div>
+        </section>
+
+        <div class="match-list" id="matchList">
+          <div class="empty">尚未載入賽事</div>
+        </div>
+      </aside>
+
+      <section class="content-panel">
+        <section class="command-bar">
+          <label class="match-id">
+            Match ID / 賽事 ID
+            <textarea id="matchIdInput" rows="2" inputmode="numeric" placeholder="可輸入一個或多個 Match ID"></textarea>
+          </label>
+
+          <label class="check">
+            <input id="includeMultiInput" type="checkbox">
+            深度補齊模式（較慢，掃多盤/長重試）
+          </label>
+
+          <div class="command-actions">
+            <button id="extractBtn" class="primary" type="button">提取單場</button>
+            <button id="batchExtractBtn" class="primary" type="button">批量提取</button>
+          </div>
+        </section>
+
+        <section class="summary-grid" id="summary"></section>
+
+        <section class="result-panel">
+          <div class="result-heading">
+            <div>
+              <p class="eyebrow">Result</p>
+              <h2 id="resultTitle">等待資料</h2>
+            </div>
+            <div class="export-actions">
+              <button id="jsonBtn" type="button" disabled>下載 JSON</button>
+              <button id="jsonlBtn" type="button" disabled>下載 JSONL</button>
+              <button id="csvBtn" type="button" disabled>下載 CSV</button>
+            </div>
+          </div>
+
+          <nav class="tabs" id="tabs">
+            <button class="active" data-tab="asianFull" type="button">亞盤 全場</button>
+            <button data-tab="asianHalf" type="button">亞盤 半場</button>
+            <button data-tab="overFull" type="button">大小 全場</button>
+            <button data-tab="overHalf" type="button">大小 半場</button>
+            <button data-tab="europe" type="button">歐洲賠率</button>
+          </nav>
+
+          <div class="table-wrap" id="tableWrap">
+            <div class="empty">尚未有資料</div>
+          </div>
+        </section>
+
+        <section class="analysis-panel">
+          <div class="result-heading compact-heading">
+            <div>
+              <p class="eyebrow">AI</p>
+              <h2>分析輸出</h2>
+            </div>
+            <div class="analysis-meta" id="analysisMeta">未分析</div>
+          </div>
+          <div class="feature-panel" id="featurePanel">
+            <div class="empty">AI 輸入資料等待中</div>
+          </div>
+          <div class="ai-progress" id="aiProgress" hidden>
+            <div class="ai-progress-top">
+              <strong id="aiProgressLabel">AI 分析進度</strong>
+              <span id="aiProgressTime">00:00</span>
+            </div>
+            <div class="ai-progress-track">
+              <div class="ai-progress-fill" id="aiProgressFill"></div>
+            </div>
+            <div class="ai-progress-detail" id="aiProgressDetail">等待開始</div>
+          </div>
+          <div class="validation-panel" id="validationPanel">
+            <div class="empty compact-empty">等待 AI 回傳稽核</div>
+          </div>
+          <div class="ai-panels">
+            <section class="mini-panel wide-panel">
+              <div class="mini-panel-heading">
+                <strong>Top 10 排名</strong>
+                <span>結構化 AI 結果</span>
+              </div>
+              <div id="top10Panel" class="mini-panel-body top10-body">
+                <div class="empty compact-empty">等待 AI 排名</div>
+              </div>
+            </section>
+            <section class="mini-panel">
+              <div class="mini-panel-heading">
+                <strong>Top 3 候選</strong>
+                <span>AI 會產生單場分析按鈕</span>
+              </div>
+              <div id="top3Panel" class="mini-panel-body">
+                <div class="empty compact-empty">等待 AI Top 10</div>
+              </div>
+            </section>
+            <section class="mini-panel">
+              <div class="mini-panel-heading">
+                <strong>單場深度</strong>
+                <span>五層框架摘要</span>
+              </div>
+              <div id="singleMatchPanel" class="mini-panel-body">
+                <div class="empty compact-empty">未有單場分析</div>
+              </div>
+            </section>
+            <section class="mini-panel">
+              <div class="mini-panel-heading">
+                <strong>分析歷史</strong>
+                <button id="clearHistoryBtn" class="mini-action" type="button">清除</button>
+              </div>
+              <div id="historyPanel" class="mini-panel-body">
+                <div class="empty compact-empty">未有紀錄</div>
+              </div>
+            </section>
+            <section class="mini-panel">
+              <div class="mini-panel-heading">
+                <strong>命中紀錄</strong>
+                <button id="clearBacktestBtn" class="mini-action" type="button">清除</button>
+              </div>
+              <div class="record-actions">
+                <button id="recordHitBtn" type="button" disabled>標記命中</button>
+                <button id="recordMissBtn" type="button" disabled>標記未中</button>
+              </div>
+              <div id="backtestPanel" class="mini-panel-body">
+                <div class="empty compact-empty">未有紀錄</div>
+              </div>
+            </section>
+          </div>
+          <div class="analysis-output" id="analysisOutput">
+            <div class="empty">完成提取或掃描後可送出分析</div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
