@@ -1,13 +1,15 @@
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
+const path = require("node:path");
 
 const DEFAULT_API_BASE_URL = "https://liangjiewis.com/v1";
 const DEFAULT_MODEL = "gemini-3.1-pro-preview-thinking";
+const REPO_ROOT = path.join(__dirname, "..");
 const DEFAULT_GUIDE_PATH =
-  process.env.ANALYSIS_GUIDE_PATH || "C:\\Users\\lamch\\Downloads\\deep-research-report (3).md";
+  process.env.ANALYSIS_GUIDE_PATH || path.join(REPO_ROOT, "AI_JSONL欄位說明.md");
 const SINGLE_MATCH_PROMPT_PATH =
-  process.env.SINGLE_MATCH_PROMPT_PATH || "C:\\Users\\lamch\\Downloads\\分析prompt.md";
+  process.env.SINGLE_MATCH_PROMPT_PATH || path.join(REPO_ROOT, "prompts", "single-match-prompt.md");
 const MAX_GUIDE_CHARS = 22000;
 const MAX_SINGLE_MATCH_PROMPT_CHARS = 42000;
 const MAX_RESPONSE_CHARS = 4 * 1024 * 1024;

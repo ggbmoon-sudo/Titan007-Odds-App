@@ -672,6 +672,11 @@ td.number {
   font-variant-numeric: tabular-nums;
 }
 
+.vguess-hot-percent {
+  color: var(--red);
+  font-weight: 900;
+}
+
 td.kickoff-cell {
   white-space: nowrap;
   word-break: normal;

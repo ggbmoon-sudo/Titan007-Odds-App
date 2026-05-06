@@ -14,6 +14,7 @@ const {
 const { normalizeOdds, _internals: hkjcInternals } = require("../src/hkjc");
 const { _internals: aiInternals } = require("../src/ai");
 const { _internals: diagnosticInternals } = require("../src/diagnostics");
+const { parseTitanGuessHomePage, parseTitanGuessIndexPage } = require("../src/titanGuess");
 
 test("Titan useful HTML checker keeps valid mobile analysis pages with 404-like data", () => {
   const validHtml = [
@@ -87,6 +88,94 @@ test("network diagnostics classifier flags common IP blocks and rate limits", ()
     text: "<html>captcha required</html>",
   });
   assert.equal(softBlock.state, "warn");
+});
+
+test("Titan V guess homepage parser reads support percentages", () => {
+  const html = `
+    <div class="title matchinfo" id="matchinfo_2916078" data-time="2026,4,6,12,00,00">
+      <span class="league">日职联</span>
+      <span class="L-time">12:00</span>
+      <a class="tit">清水鼓动 <span>VS</span> 大阪樱花</a>
+      <a class="time blue"><span>已开场</span></a>
+    </div><ul></ul>
+    <div class="panel guess"><h3>V猜球</h3><div class="info">
+      <div class="guessBar" onclick="window.open('//guess2.titan007.com/tuijian/2916078.html', '_blank')">
+        <div class="team"><div class="icon"><img src="//zq.titan007.com/home.png" /></div><span>清水鼓动</span></div>
+        <div class="guessBox">
+          <div class="guessData"><span class="hCount">28%</span><span>亚让</span><span class="gCount">72%</span></div>
+          <div class="guessData"><span class="hCount">67%</span><span>大小</span><span class="gCount">33%</span></div>
+        </div>
+        <div class="team"><div class="icon"><img src="//zq.titan007.com/away.png" /></div><span>大阪樱花</span></div>
+      </div>
+    </div></div>
+  `;
+
+  const parsed = parseTitanGuessHomePage(html);
+  assert.equal(parsed.total, 1);
+  assert.equal(parsed.hitCount, 1);
+  assert.equal(parsed.matches[0].matchId, "2916078");
+  assert.equal(parsed.matches[0].league, "日职联");
+  assert.equal(parsed.matches[0].home, "清水鼓动");
+  assert.equal(parsed.matches[0].away, "大阪樱花");
+  assert.equal(parsed.matches[0].asianAwayPercent, 72);
+  assert.equal(parsed.matches[0].asianLean, "away");
+  assert.equal(parsed.matches[0].overPercent, 67);
+  assert.equal(parsed.matches[0].totalLean, "over");
+  assert.equal(parsed.matches[0].detailUrl, "https://guess2.titan007.com/tuijian/2916078.html");
+});
+
+test("Titan V guess index parser keeps all target-league rows with hidden values", () => {
+  const html = `
+    <div class="match" id="match_position_1597007">
+      <div class="status">
+        <div class="game_guess">\u65e5\u804c\u8054<i>05-06 13:00</i><p></p></div>
+        <span class="time blue" id="time_2916078" timestate="0">未</span>
+      </div>
+      <div class="guessBox">
+        <div class="HTeam team" id="home_2916078" teamname="\u540d\u53e4\u5c4b\u9cb8\u516b"><span>[2]</span>\u540d\u53e4\u5c4b\u9cb8\u516b</div>
+        <div class="guessInfo">
+          <div id="let_jd_2916078" data-count="59" class="guessBar ">
+            <div id="let_h_2916078" class="btn off cz1">\u652f\u6301\u4e3b<span class="btnZS">0.96</span></div>
+            <div class="guessData"><span class="hCount">51%</span><span id="2916078_let" odds="0.5">\u53d7\u534a\u7403</span><span class="gCount">49%</span><div class="barBG"><div class="bar" style="width:51%"></div></div></div>
+            <div id="let_g_2916078" class="btn off cz2">\u652f\u6301\u5ba2<span class="btnZS">0.92</span></div>
+          </div>
+          <div id="ou_jd_2916078" data-count="38" class="guessBar ">
+            <div id="ou_o_2916078" class="btn off">\u652f\u6301\u5927<span class="btnZS">0.88</span></div>
+            <div class="guessData"><span class="hCount">88%</span><span id="2916078_ou" odds="2.5">2.5</span><span class="gCount">12%</span><div class="barBG"><div class="bar" style="width:88%"></div></div></div>
+            <div id="ou_u_2916078" class="btn off">\u652f\u6301\u5c0f<span class="btnZS">0.98</span></div>
+          </div>
+        </div>
+        <div class="GTeam team" id="guest_2916078" teamname="\u5927\u962a\u94a2\u5df4">\u5927\u962a\u94a2\u5df4<span>[3]</span></div>
+      </div>
+    </div>
+    <div class="popupGuessTD"></div>
+    <div class="match" id="match_position_999">
+      <div class="status"><div class="game_guess">\u6fb3\u8d85<i>05-06 14:00</i></div><span class="time blue" id="time_3000000">未</span></div>
+      <div class="guessBox">
+        <div class="HTeam team" id="home_3000000" teamname="A">A</div>
+        <div class="guessInfo"></div>
+        <div class="GTeam team" id="guest_3000000" teamname="B">B</div>
+      </div>
+    </div>
+    <div class="popupGuessTD"></div>
+  `;
+
+  const parsed = parseTitanGuessIndexPage(html, { allowedLeagues: ["\u65e5\u804c\u8054"] });
+  assert.equal(parsed.total, 1);
+  assert.equal(parsed.hitCount, 1);
+  assert.equal(parsed.matches[0].matchId, "2916078");
+  assert.equal(parsed.matches[0].league, "\u65e5\u804c\u8054");
+  assert.equal(parsed.matches[0].home, "\u540d\u53e4\u5c4b\u9cb8\u516b");
+  assert.equal(parsed.matches[0].away, "\u5927\u962a\u94a2\u5df4");
+  assert.equal(parsed.matches[0].asianLine, "\u53d7\u534a\u7403");
+  assert.equal(parsed.matches[0].asianCount, 59);
+  assert.equal(parsed.matches[0].asianHomeSupportOdds, 0.96);
+  assert.equal(parsed.matches[0].asianAwaySupportOdds, 0.92);
+  assert.equal(parsed.matches[0].totalCount, 38);
+  assert.equal(parsed.matches[0].overSupportOdds, 0.88);
+  assert.equal(parsed.matches[0].underSupportOdds, 0.98);
+  assert.equal(parsed.matches[0].overPercent, 88);
+  assert.equal(parsed.matches[0].hot, true);
 });
 
 test("AI chat completions URL accepts Liangjie root, base, and full endpoint", () => {
@@ -425,6 +514,22 @@ test("parseLiveMatches searches inside the allowed league set", () => {
   const matches = parseLiveMatches(script, { league: "韩K联" });
   assert.equal(matches.length, 1);
   assert.equal(matches[0].league, "韓K聯");
+});
+
+test("parseLiveMatches includes Japan top league current-year aliases", () => {
+  const script = `
+    var A=Array(1);
+    A[1]="1001^#5ca39a^日職百年構想聯賽^日職百年構想聯賽^^橫濱水手^橫濱水手^^川崎前鋒^川崎前鋒^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+  `;
+
+  const defaultMatches = parseLiveMatches(script);
+  assert.equal(defaultMatches.length, 1);
+  assert.equal(defaultMatches[0].league, "日職百年構想聯賽");
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("日職聯"));
+
+  const searchedMatches = parseLiveMatches(script, { league: "日職聯" });
+  assert.equal(searchedMatches.length, 1);
+  assert.equal(searchedMatches[0].league, "日職百年構想聯賽");
 });
 
 test("parseLiveMatches includes added women and regional leagues", () => {

@@ -3,6 +3,7 @@ const state = {
   batch: null,
   hkjc: null,
   probability: null,
+  titanGuess: null,
   diagnostics: null,
   analysis: null,
   context: null,
@@ -96,6 +97,7 @@ const els = {
   extractLoadedBtn: document.getElementById("extractLoadedBtn"),
   probabilityWindowInput: document.getElementById("probabilityWindowInput"),
   probabilityScanBtn: document.getElementById("probabilityScanBtn"),
+  titanGuessScanBtn: document.getElementById("titanGuessScanBtn"),
   extractFourHourBtn: document.getElementById("extractFourHourBtn"),
   extractHkjcSixHourBtn: document.getElementById("extractHkjcSixHourBtn"),
   extractHkjcTwelveHourBtn: document.getElementById("extractHkjcTwelveHourBtn"),
@@ -261,8 +263,25 @@ function ensureFourHourButton() {
   els.extractFourHourBtn = button;
 }
 
+function ensureTitanGuessButton() {
+  if (els.titanGuessScanBtn || !els.probabilityScanBtn?.parentElement) return;
+  const button = document.createElement("button");
+  button.id = "titanGuessScanBtn";
+  button.className = "wide-action";
+  button.type = "button";
+  button.textContent = "掃 V猜球";
+  const anchor = els.probabilityScanBtn;
+  if (anchor.nextSibling) {
+    anchor.parentElement.insertBefore(button, anchor.nextSibling);
+  } else {
+    anchor.parentElement.appendChild(button);
+  }
+  els.titanGuessScanBtn = button;
+}
+
 arrangeControlPanel();
 ensureFourHourButton();
+ensureTitanGuessButton();
 ensureHkjcSpecialOddsButton();
 ensureHkjcCrsEqualOddsButton();
 ensureNetworkDiagnosticsButton();
@@ -284,6 +303,12 @@ function formatDuration(ms) {
   const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
   const seconds = String(totalSeconds % 60).padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function formatShortTime(value) {
+  const date = new Date(value || "");
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" });
 }
 
 function filenameTimestamp(date = new Date()) {
@@ -1083,7 +1108,7 @@ function updateAnalysisButton() {
 }
 
 function updateSummary() {
-  els.tabs.hidden = Boolean(state.hkjc || state.probability || state.diagnostics);
+  els.tabs.hidden = Boolean(state.hkjc || state.probability || state.titanGuess || state.diagnostics);
 
   if (state.hkjc) {
     const errors = state.hkjc.errors?.length || 0;
@@ -1111,6 +1136,20 @@ function updateSummary() {
       { label: "80%+", value: state.probability.hitCount || 0 },
       { label: "無資料", value: state.probability.noDataCount || 0 },
       { label: "錯誤", value: errors, className: errors ? "warning" : "" },
+    ]);
+    updateAnalysisButton();
+    return;
+  }
+
+  if (state.titanGuess) {
+    els.resultTitle.textContent = `Titan007 V猜球 ${state.titanGuess.hitCount || 0}/${state.titanGuess.total || 0} 筆`;
+    renderSummaryCards([
+      { label: "模式", value: "V猜球" },
+      { label: "來源", value: state.titanGuess.fromCache ? "Titan007 V猜球快取" : "Titan007 V猜球總頁" },
+      { label: "掃描賽事", value: state.titanGuess.total || 0 },
+      { label: "70%+", value: state.titanGuess.hitCount || 0 },
+      { label: "門檻", value: `${state.titanGuess.threshold || 70}%` },
+      { label: state.titanGuess.fromCache ? "快取時間" : "更新", value: formatShortTime(state.titanGuess.fetchedAt) || "剛剛" },
     ]);
     updateAnalysisButton();
     return;
@@ -1471,6 +1510,10 @@ function renderActiveTab() {
     renderProbabilityTable();
     return;
   }
+  if (state.titanGuess) {
+    renderTitanGuessTable();
+    return;
+  }
   if (state.diagnostics && !state.batch && !state.data) {
     renderDiagnosticsTable();
     return;
@@ -1681,11 +1724,23 @@ function renderProbabilityTable() {
   `;
 }
 
+function guessLeanLabel(match, market) {
+  if (market === "asian") {
+    if (match.asianLean === "home") return `${match.home || "主隊"}方向`;
+    if (match.asianLean === "away") return `${match.away || "客隊"}方向`;
+    return "均衡";
+  }
+  if (match.totalLean === "over") return "大";
+  if (match.totalLean === "under") return "小";
+  return "均衡";
+}
+
 function setMatchButtons(enabled) {
   els.selectAllBtn.disabled = !enabled || state.working;
   els.clearSelectionBtn.disabled = !enabled || state.working;
   els.extractLoadedBtn.disabled = !enabled || state.working;
   els.probabilityScanBtn.disabled = state.working;
+  if (els.titanGuessScanBtn) els.titanGuessScanBtn.disabled = state.working;
   if (els.extractFourHourBtn) els.extractFourHourBtn.disabled = state.working;
   if (els.hkjcSpecialOddsBtn) els.hkjcSpecialOddsBtn.disabled = state.working;
   if (els.hkjcCrsEqualOddsBtn) els.hkjcCrsEqualOddsBtn.disabled = state.working;
@@ -1739,6 +1794,7 @@ function setWorking(isWorking) {
   if (els.workerCountInput) els.workerCountInput.disabled = isWorking;
   if (els.probabilityWindowInput) els.probabilityWindowInput.disabled = isWorking;
   els.probabilityScanBtn.disabled = isWorking;
+  if (els.titanGuessScanBtn) els.titanGuessScanBtn.disabled = isWorking;
   if (els.extractFourHourBtn) els.extractFourHourBtn.disabled = isWorking;
   els.extractHkjcSixHourBtn.disabled = isWorking;
   els.extractHkjcTwelveHourBtn.disabled = isWorking;
@@ -1748,6 +1804,91 @@ function setWorking(isWorking) {
   els.extractLoadedBtn.disabled = isWorking || !state.loadedMatches.length;
   els.extractSelectedBtn.disabled = isWorking || selectedMatches().length === 0;
   updateAnalysisButton();
+}
+
+function renderTitanGuessTable() {
+  const data = state.titanGuess;
+  if (!data) return;
+
+  const matches = data.matches || [];
+  if (!matches.length) {
+    els.tableWrap.innerHTML = `<div class="empty">Titan007 V猜球總頁暫時沒有命中目標賽事</div>`;
+    return;
+  }
+
+  const pct = (value) => {
+    if (value === "" || value === null || value === undefined) return "";
+    const number = Number(value);
+    const text = `${escapeHtml(value)}%`;
+    return Number.isFinite(number) && number > 75 ? `<span class="vguess-hot-percent">${text}</span>` : text;
+  };
+  const rows = matches
+    .map(
+      (match) => {
+        const maxPercent = Number(match.maxPercent || 0);
+        const badgeClass = maxPercent > 75 ? "error" : match.hot ? "ok" : "warn";
+        const badgeLabel = maxPercent > 75 ? "75%+" : match.hot ? "70%+" : "目標";
+        return `
+        <tr>
+          <td><span class="diagnostic-badge ${badgeClass}">${badgeLabel}</span></td>
+          <td>${escapeHtml(match.matchId)}</td>
+          <td>${escapeHtml(match.league || "")}</td>
+          <td>${escapeHtml(match.kickoffTime || match.state || "")}</td>
+          <td>${escapeHtml(match.home || "")}</td>
+          <td>${escapeHtml(match.away || "")}</td>
+          <td>${escapeHtml(match.asianLine || "")}</td>
+          <td class="number">${pct(match.asianHomePercent)}</td>
+          <td class="number">${pct(match.asianAwayPercent)}</td>
+          <td class="number">${escapeHtml(match.asianHomeSupportOdds ?? "")}</td>
+          <td class="number">${escapeHtml(match.asianAwaySupportOdds ?? "")}</td>
+          <td class="number">${escapeHtml(match.asianCount ?? "")}</td>
+          <td>${escapeHtml(guessLeanLabel(match, "asian"))}</td>
+          <td>${escapeHtml(match.totalLine || "")}</td>
+          <td class="number">${pct(match.overPercent)}</td>
+          <td class="number">${pct(match.underPercent)}</td>
+          <td class="number">${escapeHtml(match.overSupportOdds ?? "")}</td>
+          <td class="number">${escapeHtml(match.underSupportOdds ?? "")}</td>
+          <td class="number">${escapeHtml(match.totalCount ?? "")}</td>
+          <td>${escapeHtml(guessLeanLabel(match, "total"))}</td>
+          <td class="number">${pct(match.maxPercent || 0)}</td>
+          <td>${match.detailUrl ? `<a href="${escapeHtml(match.detailUrl)}" target="_blank" rel="noreferrer">V猜球</a>` : ""}</td>
+        </tr>
+      `;
+      }
+    )
+    .join("");
+
+  els.tableWrap.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th style="width:78px">標記</th>
+          <th style="width:95px">Match ID</th>
+          <th style="width:100px">聯賽</th>
+          <th style="width:88px">時間</th>
+          <th style="width:130px">主隊</th>
+          <th style="width:130px">客隊</th>
+          <th style="width:78px">亞盤</th>
+          <th style="width:78px">主%</th>
+          <th style="width:78px">客%</th>
+          <th style="width:70px">主水</th>
+          <th style="width:70px">客水</th>
+          <th style="width:70px">亞人數</th>
+          <th style="width:92px">亞方向</th>
+          <th style="width:78px">大小盤</th>
+          <th style="width:78px">大%</th>
+          <th style="width:78px">小%</th>
+          <th style="width:70px">大水</th>
+          <th style="width:70px">小水</th>
+          <th style="width:70px">大小人數</th>
+          <th style="width:92px">大小方向</th>
+          <th style="width:78px">最高</th>
+          <th style="width:82px">連結</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
 }
 
 function setExportButtons(enabled) {
@@ -1923,6 +2064,7 @@ async function extract() {
     state.batch = null;
     state.hkjc = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     renderActiveTab();
     setExportButtons(true);
@@ -1933,6 +2075,7 @@ async function extract() {
     state.batch = null;
     state.hkjc = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
@@ -1993,6 +2136,7 @@ async function extractBatchLegacy(matches, options = {}) {
       state.data = null;
       state.hkjc = null;
       state.probability = null;
+      state.titanGuess = null;
       updateSummary();
       renderActiveTab();
       if (results.some((result) => result?.ok && result.data)) {
@@ -2049,6 +2193,7 @@ async function extractBatchLegacy(matches, options = {}) {
     state.data = null;
     state.hkjc = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
@@ -2115,6 +2260,7 @@ async function extractBatch(matches, options = {}) {
       state.data = null;
       state.hkjc = null;
       state.probability = null;
+      state.titanGuess = null;
       updateSummary();
       renderActiveTab();
       if (orderedResults.some((result) => result?.ok && result.data)) {
@@ -2198,6 +2344,7 @@ async function extractBatch(matches, options = {}) {
     state.data = null;
     state.hkjc = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
@@ -2449,12 +2596,14 @@ async function scanProbabilityEvents() {
     state.hkjc = null;
     state.batch = null;
     state.data = null;
+    state.titanGuess = null;
     updateSummary();
     renderProbabilityTable();
     setExportButtons(true);
     setStatus(`概率80%+ ${state.probability.hitCount || 0}筆`);
   } catch (error) {
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
@@ -2595,6 +2744,7 @@ async function scanProbabilityEventsPerMatch() {
     setStatus(`概率80%+ ${state.probability.hitCount || 0}筆 · ${concurrency} worker`);
   } catch (error) {
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
@@ -2617,6 +2767,7 @@ async function scanHkjc() {
     state.data = null;
     state.batch = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     renderHkjcTable();
     setExportButtons(true);
@@ -2624,9 +2775,42 @@ async function scanHkjc() {
   } catch (error) {
     state.hkjc = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
+  } finally {
+    setWorking(false);
+    updateSelectedButton();
+  }
+}
+
+async function scanTitanGuess() {
+  setStatus("V猜球掃描中");
+  setWorking(true);
+  setExportButtons(false);
+  clearAnalysis();
+  state.diagnostics = null;
+  state.data = null;
+  state.batch = null;
+  state.hkjc = null;
+  state.probability = null;
+  state.titanGuess = null;
+  updateSummary();
+  els.tableWrap.innerHTML = `<div class="empty">正在讀取 Titan007 V猜球總頁，篩選目標賽事...</div>`;
+
+  try {
+    const body = await getJson("/api/titan-guess-scan?limit=120&threshold=70&timeoutMs=60000&attempts=1");
+    state.titanGuess = body.data;
+    updateSummary();
+    renderTitanGuessTable();
+    setExportButtons(true);
+    setStatus(`V猜球 ${state.titanGuess.hitCount || 0}/${state.titanGuess.total || 0}${state.titanGuess.fromCache ? " 快取" : ""}`);
+  } catch (error) {
+    state.titanGuess = null;
+    updateSummary();
+    els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+    setStatus("V猜球錯誤");
   } finally {
     setWorking(false);
     updateSelectedButton();
@@ -2647,6 +2831,7 @@ async function scanHkjcSpecialOdds() {
     state.data = null;
     state.batch = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     renderHkjcTable();
     setExportButtons(true);
@@ -2654,6 +2839,7 @@ async function scanHkjcSpecialOdds() {
   } catch (error) {
     state.hkjc = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
@@ -2677,6 +2863,7 @@ async function scanHkjcCrsEqualOdds() {
     state.data = null;
     state.batch = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     renderHkjcTable();
     setExportButtons(true);
@@ -2684,6 +2871,7 @@ async function scanHkjcCrsEqualOdds() {
   } catch (error) {
     state.hkjc = null;
     state.probability = null;
+    state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
@@ -2703,6 +2891,7 @@ async function runNetworkDiagnostics() {
   state.batch = null;
   state.hkjc = null;
   state.probability = null;
+  state.titanGuess = null;
   updateSummary();
   els.tableWrap.innerHTML = `<div class="empty">正在檢查 Titan007 / HKJC 入口、API、盤口頁與出口 IP...</div>`;
 
@@ -2829,6 +3018,9 @@ function flattenForCsv() {
   }
   if (state.probability) {
     return state.probability.hits || [];
+  }
+  if (state.titanGuess) {
+    return state.titanGuess.matches || [];
   }
 
   return flattenTitanItems(batchItems());
@@ -2958,6 +3150,9 @@ function rowsForMatchId(matchId) {
   if (state.probability) {
     return (state.probability.hits || []).filter((hit) => normalizeId(hit.matchId) === needle);
   }
+  if (state.titanGuess) {
+    return (state.titanGuess.matches || []).filter((match) => normalizeId(match.matchId) === needle);
+  }
 
   return flattenForCsv().filter((row) => normalizeId(row.matchId) === needle);
 }
@@ -3011,6 +3206,7 @@ function matchFeatureById(snapshot, matchId) {
 function currentAnalysisSource() {
   if (state.hkjc) return "hkjc_scan";
   if (state.probability) return "titan_probability_events";
+  if (state.titanGuess) return "titan_v_guess";
   if (state.batch) return "titan_batch";
   if (state.data) return "titan_single";
   return "empty";
@@ -3028,6 +3224,44 @@ function compactObject(object, keys) {
 }
 
 function compactAnalysisRow(row) {
+  if (state.titanGuess || row.asianHomePercent !== undefined || row.overPercent !== undefined) {
+    return compactObject(row, [
+      "matchId",
+      "guessId",
+      "league",
+      "kickoffTime",
+      "state",
+      "score",
+      "home",
+      "away",
+      "homeRank",
+      "awayRank",
+      "asianLine",
+      "asianLineOdds",
+      "asianCount",
+      "asianHomePercent",
+      "asianAwayPercent",
+      "asianHomeSupportOdds",
+      "asianAwaySupportOdds",
+      "asianLean",
+      "asianEdge",
+      "totalLine",
+      "totalLineOdds",
+      "totalCount",
+      "overPercent",
+      "underPercent",
+      "overSupportOdds",
+      "underSupportOdds",
+      "totalLean",
+      "totalEdge",
+      "maxPercent",
+      "maxEdge",
+      "hot",
+      "detailUrl",
+      "sourcePage",
+    ]);
+  }
+
   if (state.hkjc || row.pool || row.sourcePage) {
     return compactObject(row, [
       "pool",
@@ -4322,6 +4556,46 @@ function toCsv(rows) {
     return [headers.join(","), ...rows.map((row) => headers.map((key) => escapeCsv(row[key])).join(","))].join("\n");
   }
 
+  if (state.titanGuess) {
+    const headers = [
+      "matchId",
+      "guessId",
+      "league",
+      "kickoffTime",
+      "state",
+      "score",
+      "home",
+      "away",
+      "homeRank",
+      "awayRank",
+      "asianLine",
+      "asianLineOdds",
+      "asianCount",
+      "asianHomePercent",
+      "asianAwayPercent",
+      "asianHomeSupportOdds",
+      "asianAwaySupportOdds",
+      "asianLean",
+      "asianEdge",
+      "totalLine",
+      "totalLineOdds",
+      "totalCount",
+      "overPercent",
+      "underPercent",
+      "overSupportOdds",
+      "underSupportOdds",
+      "totalLean",
+      "totalEdge",
+      "maxPercent",
+      "maxEdge",
+      "hot",
+      "detailUrl",
+      "sourcePage",
+    ];
+    const escapeCsv = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    return [headers.join(","), ...rows.map((row) => headers.map((key) => escapeCsv(row[key])).join(","))].join("\n");
+  }
+
   const headers = [
     "matchId",
     "league",
@@ -4381,6 +4655,7 @@ function toJsonl(rows) {
 els.loadMatchesBtn.addEventListener("click", loadMatches);
 els.quickExtractBtn.addEventListener("click", quickExtract);
 els.probabilityScanBtn.addEventListener("click", scanProbabilityEventsPerMatch);
+els.titanGuessScanBtn?.addEventListener("click", scanTitanGuess);
 els.extractFourHourBtn?.addEventListener("click", extractFourHourUpcoming);
 els.extractHkjcSixHourBtn.addEventListener("click", extractHkjcSixHourOpen);
 els.extractHkjcTwelveHourBtn.addEventListener("click", extractHkjcTwelveHourOpen);
@@ -4599,15 +4874,17 @@ els.tabs.addEventListener("click", (event) => {
 });
 
 els.jsonBtn.addEventListener("click", () => {
-  const payload = state.hkjc || state.probability || state.batch || state.data;
+  const payload = state.hkjc || state.probability || state.titanGuess || state.batch || state.data;
   if (!payload) return;
   const filename = state.hkjc
     ? `hkjc-scan-${Date.now()}.json`
     : state.probability
       ? `titan007-probability-${Date.now()}.json`
-      : state.batch
-        ? `titan007-batch-${Date.now()}.json`
-        : `titan007-${state.data.matchId}.json`;
+      : state.titanGuess
+        ? `titan007-v-guess-${Date.now()}.json`
+        : state.batch
+          ? `titan007-batch-${Date.now()}.json`
+          : `titan007-${state.data.matchId}.json`;
   download(filename, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
 });
 
@@ -4619,9 +4896,11 @@ els.jsonlBtn.addEventListener("click", () => {
     ? `hkjc-scan-${currentTime}.jsonl`
     : state.probability
       ? `titan007-probability-${currentTime}.jsonl`
-      : state.batch
-        ? `titan007-batch-${currentTime}.jsonl`
-        : `titan007-${state.data.matchId}-${currentTime}.jsonl`;
+      : state.titanGuess
+        ? `titan007-v-guess-${currentTime}.jsonl`
+        : state.batch
+          ? `titan007-batch-${currentTime}.jsonl`
+          : `titan007-${state.data.matchId}-${currentTime}.jsonl`;
   download(filename, toJsonl(rows), "application/x-ndjson;charset=utf-8");
 });
 
@@ -4632,9 +4911,11 @@ els.csvBtn.addEventListener("click", () => {
     ? `hkjc-scan-${Date.now()}.csv`
     : state.probability
       ? `titan007-probability-${Date.now()}.csv`
-      : state.batch
-        ? `titan007-batch-${Date.now()}.csv`
-        : `titan007-${state.data.matchId}.csv`;
+      : state.titanGuess
+        ? `titan007-v-guess-${Date.now()}.csv`
+        : state.batch
+          ? `titan007-batch-${Date.now()}.csv`
+          : `titan007-${state.data.matchId}.csv`;
   download(filename, toCsv(rows), "text/csv;charset=utf-8");
 });
 
