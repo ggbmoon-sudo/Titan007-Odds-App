@@ -32,6 +32,7 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "芬超",
   "挪超",
   "日職",
+  "日職聯",
   "美冠聯",
   "美冠盃",
   "美職業",
@@ -109,6 +110,26 @@ const LEAGUE_ALIASES = {
     "卡塔尔杯",
   ],
   "歐冠盃": ["歐冠", "歐洲冠軍聯賽"],
+  "日職": [
+    "日職聯",
+    "日本職業聯賽",
+    "日本职业联赛",
+    "日職百年構想聯賽",
+    "日職百年构想联赛",
+    "J聯賽百年構想聯賽",
+    "J聯賽百年构想联赛",
+    "Jリーグ百年構想リーグ",
+  ],
+  "日職聯": [
+    "日職",
+    "日本職業聯賽",
+    "日本职业联赛",
+    "日職百年構想聯賽",
+    "日職百年构想联赛",
+    "J聯賽百年構想聯賽",
+    "J聯賽百年构想联赛",
+    "Jリーグ百年構想リーグ",
+  ],
   "女歐霸盃": ["歐女霸盃", "女子歐霸盃", "歐洲女子歐霸盃"],
   "日女聯": ["日女联", "日本女足聯賽", "日本女足联赛", "日本女子足球聯賽", "日本女子足球联赛"],
   "韓K2": ["韓K2聯", "韓K2联", "韩K2", "韓國K2聯賽", "韩国K2联赛", "K League 2", "K聯賽2"],
@@ -274,7 +295,26 @@ function recordMatchesLeagueSearch(record, league) {
   const rawHaystack = `${record.league} ${record.leagueSimplified} ${record.leagueTraditional}`.toLowerCase();
   const normalizedHaystack = normalizeComparableText(rawHaystack);
 
-  return rawHaystack.includes(needle) || (normalizedNeedle && normalizedHaystack.includes(normalizedNeedle));
+  if (rawHaystack.includes(needle) || (normalizedNeedle && normalizedHaystack.includes(normalizedNeedle))) {
+    return true;
+  }
+
+  const aliases = new Set();
+  for (const [canonical, values] of Object.entries({ ...LEAGUE_ALIASES, ...SUPPLEMENTAL_LEAGUE_ALIASES })) {
+    const candidates = [canonical, ...(values || [])];
+    const normalizedCandidates = candidates.map(normalizeComparableText).filter(Boolean);
+    const matchesQuery =
+      candidates.some((candidate) => String(candidate || "").toLowerCase().includes(needle)) ||
+      normalizedCandidates.some((candidate) => normalizedNeedle && candidate.includes(normalizedNeedle));
+    if (!matchesQuery) continue;
+    for (const candidate of candidates) aliases.add(candidate);
+  }
+
+  return [...aliases].some((alias) => {
+    const rawAlias = String(alias || "").toLowerCase().trim();
+    const normalizedAlias = normalizeComparableText(alias);
+    return (rawAlias && rawHaystack.includes(rawAlias)) || (normalizedAlias && normalizedHaystack.includes(normalizedAlias));
+  });
 }
 
 const NORMALIZED_BOOKMAKER_GROUPS = BOOKMAKER_GROUPS.map((group) => ({
@@ -1960,11 +2000,14 @@ module.exports = {
     extractFlatOddsRows,
     extractJsObjectLiteral,
     assertUsefulHtml,
+    buildAllowedLeagueSet,
     latestEuropeRows,
+    normalizeComparableText,
     normalizeMatchItems,
     parseProbabilityEvents,
     parseProbabilityEventsFromJson,
     probabilityTextLines,
+    recordMatchesAllowedLeagues,
     titanProbabilityUrl,
   },
 };

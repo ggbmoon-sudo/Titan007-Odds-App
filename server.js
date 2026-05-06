@@ -16,6 +16,7 @@ const { checkTitanMatchesInHkjc, scanHkjcCorrectScoreEqualOdds, scanHkjcOdds } =
 const { analyzeOddsPayload, buildAiInputPreview, getAnalysisGuideStatus, testAiConnection } = require("./src/ai");
 const { buildContextForMatches } = require("./src/context");
 const { runNetworkDiagnostics } = require("./src/diagnostics");
+const { scanTitanGuess } = require("./src/titanGuess");
 
 const HOST = process.env.HOST || "127.0.0.1";
 const START_PORT = Number(process.env.PORT || 3000);
@@ -283,6 +284,17 @@ const server = http.createServer(async (req, res) => {
     if (requestUrl.pathname === "/api/network-diagnostics") {
       const data = await runNetworkDiagnostics({
         timeoutMs: Number(requestUrl.searchParams.get("timeoutMs") || 12000),
+      });
+      sendJson(res, 200, { ok: true, data });
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/titan-guess-scan") {
+      const data = await scanTitanGuess({
+        limit: Number(requestUrl.searchParams.get("limit") || 120),
+        threshold: Number(requestUrl.searchParams.get("threshold") || 70),
+        timeoutMs: Number(requestUrl.searchParams.get("timeoutMs") || 60000),
+        attempts: Number(requestUrl.searchParams.get("attempts") || 1),
       });
       sendJson(res, 200, { ok: true, data });
       return;

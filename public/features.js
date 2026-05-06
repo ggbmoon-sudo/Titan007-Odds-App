@@ -519,8 +519,90 @@
     };
   }
 
+  function buildTitanGuessFeature(row) {
+    const flags = [];
+    const asianMax = Math.max(Number(row.asianHomePercent || 0), Number(row.asianAwayPercent || 0));
+    const totalMax = Math.max(Number(row.overPercent || 0), Number(row.underPercent || 0));
+    const asianEdge = Number(row.asianEdge || 0);
+    const totalEdge = Number(row.totalEdge || 0);
+
+    if (asianMax >= 70) {
+      addFlag(
+        flags,
+        "V猜球亞讓支持度集中",
+        asianMax >= 80 ? "danger" : "warning",
+        `${row.asianLean === "away" ? row.away : row.home}: ${asianMax}%`
+      );
+    }
+    if (totalMax >= 70) {
+      addFlag(
+        flags,
+        "V猜球大小支持度集中",
+        totalMax >= 80 ? "danger" : "warning",
+        `${row.totalLean === "under" ? "小" : "大"}: ${totalMax}%`
+      );
+    }
+    if (!flags.length) addFlag(flags, "V猜球分佈接近，暫作觀察", "info");
+
+    const conflictScore = clamp(Math.max(asianEdge, totalEdge), 0, 100);
+    const confidenceScore = clamp(Math.max(asianMax, totalMax), 0, 100);
+    return {
+      matchId: row.matchId,
+      league: row.league || "",
+      kickoffTime: row.kickoffTime || "",
+      home: row.home || "",
+      away: row.away || "",
+      asianLine: row.asianLine || "",
+      asianCount: row.asianCount || "",
+      asianHomePercent: row.asianHomePercent || "",
+      asianAwayPercent: row.asianAwayPercent || "",
+      asianHomeSupportOdds: row.asianHomeSupportOdds || "",
+      asianAwaySupportOdds: row.asianAwaySupportOdds || "",
+      asianLean: row.asianLean || "",
+      totalLine: row.totalLine || "",
+      totalCount: row.totalCount || "",
+      overPercent: row.overPercent || "",
+      underPercent: row.underPercent || "",
+      overSupportOdds: row.overSupportOdds || "",
+      underSupportOdds: row.underSupportOdds || "",
+      totalLean: row.totalLean || "",
+      conflictScore,
+      conflictLevel: riskLabel(conflictScore),
+      confidenceScore,
+      confidenceLevel: confidenceLabel(confidenceScore),
+      flags,
+    };
+  }
+
+  function buildTitanGuessSnapshot(rows) {
+    const features = rows.map(buildTitanGuessFeature);
+    const topRisks = [...features].sort((a, b) => b.conflictScore - a.conflictScore).slice(0, 8);
+    const topConfidence = [...features].sort((a, b) => b.confidenceScore - a.confidenceScore).slice(0, 10);
+    const avgScore = round(average(features.map((item) => item.conflictScore)) || 0, 1);
+    const avgConfidence = round(average(features.map((item) => item.confidenceScore)) || 0, 1);
+
+    return {
+      version: "local-feature-engine-1",
+      source: "titan_v_guess",
+      generatedAt: new Date().toISOString(),
+      summary: {
+        matchCount: features.length,
+        rowCount: rows.length,
+        conflictCount: features.reduce((count, item) => count + item.flags.length, 0),
+        highRiskCount: features.filter((item) => item.conflictScore >= 70).length,
+        avgConflictScore: avgScore,
+        avgConfidenceScore: avgConfidence,
+        pressure: pressureLabel(avgScore),
+      },
+      matches: features,
+      topRisks,
+      topConfidence,
+    };
+  }
+
   function buildFeatureSnapshot({ source, rows, matches, hkjc }) {
     const safeRows = Array.isArray(rows) ? rows : [];
+    if (source === "titan_v_guess") return buildTitanGuessSnapshot(safeRows);
     if (source === "hkjc_scan") return buildHkjcSnapshot(safeRows, hkjc);
     return buildTitanSnapshot(safeRows, matches || []);
   }
