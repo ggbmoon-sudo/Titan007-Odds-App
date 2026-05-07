@@ -1251,6 +1251,35 @@ test("HKJC match checker tolerates club prefixes and one-character transliterati
   assert.equal(hkjcInternals.normalizeTeamName("CA普拉坦斯"), "普拉坦斯");
 });
 
+test("HKJC match checker applies team alias groups across all compared matches", () => {
+  const hkjcMatch = {
+    matchId: "h5",
+    frontEndId: "FB8973",
+    kickOffTime: "2026-05-08T08:00:00.000+08:00",
+    status: "PREEVENT",
+    tournament: "南美自由盃",
+    home: "哥甘保",
+    away: "秘魯體育大學",
+    poolTypes: ["HAD", "HIL"],
+    pools: [{ pool: "HAD", status: "SELLINGSTARTED" }],
+  };
+
+  const check = hkjcInternals.compareTitanMatchToHkjc(
+    {
+      matchId: "2963558",
+      league: "解放者杯",
+      kickoffTime: "08:00",
+      home: "科金博",
+      away: "秘魯體育大學",
+    },
+    [hkjcMatch]
+  );
+
+  assert.equal(check.status, "open");
+  assert.equal(check.matched.frontEndId, "FB8973");
+  assert.ok(check.score >= 90);
+});
+
 test("HKJC match checker keeps same-time wrong teams below possible threshold", () => {
   const hkjcMatch = {
     matchId: "h4",
@@ -1278,6 +1307,34 @@ test("HKJC match checker keeps same-time wrong teams below possible threshold", 
 
   assert.equal(check.status, "not_found");
   assert.ok(check.score < 58);
+});
+
+test("HKJC match checker does not open on one matching side only", () => {
+  const hkjcMatch = {
+    matchId: "h6",
+    frontEndId: "FB8964",
+    kickOffTime: "2026-05-08T03:00:00.000+08:00",
+    status: "PREEVENT",
+    tournament: "歐霸盃",
+    home: "阿士東維拉",
+    away: "諾定咸森林",
+    poolTypes: ["HAD", "HIL"],
+    pools: [{ pool: "HAD", status: "SELLINGSTARTED" }],
+  };
+
+  const check = hkjcInternals.compareTitanMatchToHkjc(
+    {
+      matchId: "x1",
+      league: "歐霸盃",
+      kickoffTime: "03:00",
+      home: "阿士東維拉",
+      away: "布拉加",
+    },
+    [hkjcMatch]
+  );
+
+  assert.equal(check.status, "possible");
+  assert.ok(check.score < 72);
 });
 
 test("HKJC match checker short-circuits empty Titan lists", async () => {

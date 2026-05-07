@@ -255,6 +255,17 @@ const COMPETITION_ALIAS_GROUPS = [
   ["日职联", "日職聯", "日职百年构想联赛", "日職百年構想聯賽", "j1 league"],
 ];
 
+const TEAM_ALIAS_GROUPS = [
+  ["費雷堡", "弗賴堡", "弗赖堡", "freiburg"],
+  ["普拉騰斯", "普拉坦斯", "CA普拉坦斯", "platense"],
+  ["科金博", "哥甘保", "coquimbo", "coquimbo unido"],
+  ["奧特黎獨立", "曼特寧獨立", "麥德林獨立", "麦德林独立", "independiente medellin"],
+  ["波坦奴", "波特諾", "波特诺山丘", "cerro porteno"],
+  ["卡拉波波", "卡拉保保", "carabobo"],
+  ["巴拉干天奴", "巴拉干天奴紅牛", "布拉干蒂诺RB", "bragantino", "red bull bragantino"],
+  ["FC邁亞密", "邁亞密FC", "迈阿密FC", "miami fc"],
+];
+
 function foldComparableText(value) {
   return String(value || "")
     .normalize("NFKC")
@@ -323,11 +334,20 @@ function editSimilarity(left, right) {
   return 1 - editDistance(left, right) / maxLength;
 }
 
+function aliasGroupMatch(left, right) {
+  for (const group of TEAM_ALIAS_GROUPS) {
+    const normalizedGroup = group.map(normalizeTeamName).filter(Boolean);
+    if (normalizedGroup.includes(left) && normalizedGroup.includes(right)) return true;
+  }
+  return false;
+}
+
 function normalizedSimilarity(left, right) {
   const a = normalizeTeamName(left);
   const b = normalizeTeamName(right);
   if (!a || !b) return 0;
   if (a === b) return 1;
+  if (aliasGroupMatch(a, b)) return 1;
   if (a.includes(b) || b.includes(a)) {
     const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
     return Math.max(0.82, Math.min(0.96, ratio + 0.18));
@@ -475,13 +495,26 @@ function scoreMatchPair(titanMatch, hkjcMatch) {
   const teamScore = Math.max(directTeamScore, swappedTeamScore);
   const kickoffScore = timeScore(titanMatch, hkjcMatch);
   const leagueScore = competitionSimilarity(titanMatch, hkjcMatch);
-  const score = Math.round((teamScore * 0.74 + kickoffScore * 0.18 + leagueScore * 0.08) * 100);
+  let score = Math.round((teamScore * 0.74 + kickoffScore * 0.18 + leagueScore * 0.08) * 100);
+  const alignedHome = swapped ? swappedHome : directHome;
+  const alignedAway = swapped ? swappedAway : directAway;
+
+  if (kickoffScore >= 0.98 && leagueScore >= 0.92) {
+    const strongSide = Math.max(alignedHome, alignedAway);
+    const weakSide = Math.min(alignedHome, alignedAway);
+
+    if (strongSide >= 0.92 && weakSide >= 0.28) {
+      score = Math.max(score, 82);
+    }
+  }
 
   return {
     score,
     teamScore: Math.round(teamScore * 100),
     timeScore: Math.round(kickoffScore * 100),
     leagueScore: Math.round(leagueScore * 100),
+    homeScore: Math.round(alignedHome * 100),
+    awayScore: Math.round(alignedAway * 100),
     swapped,
   };
 }
@@ -589,6 +622,9 @@ function compareTitanMatchToHkjc(titanMatch, hkjcMatches, options = {}) {
     score: best.score,
     teamScore: best.teamScore,
     timeScore: best.timeScore,
+    leagueScore: best.leagueScore,
+    homeScore: best.homeScore,
+    awayScore: best.awayScore,
     swapped: best.swapped,
     matched: best.match,
   };
