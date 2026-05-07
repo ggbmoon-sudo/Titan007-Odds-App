@@ -12,6 +12,8 @@ const state = {
   loadedMatchesById: new Map(),
   hkjcMatchCheck: null,
   hkjcMatchCheckPromise: null,
+  hkjcMatchCheckRunId: 0,
+  hkjcMatchCheckTimer: null,
   activeTab: "asianFull",
   working: false,
   serverOnline: false,
@@ -1788,7 +1790,17 @@ function hkjcMatchBadge(match) {
     : check.error || "";
   const pools = check.matched?.poolTypes?.length ? ` · ${check.matched.poolTypes.join("/")}` : "";
   const score = check.score ? ` ${check.score}%` : "";
-  const label = check.label || (check.status === "open" ? "HKJC 已開" : check.status === "possible" ? "HKJC 疑似" : "HKJC 未見");
+  const label =
+    check.label ||
+    (check.status === "open"
+      ? "HKJC 已開"
+      : check.status === "possible"
+        ? "HKJC 疑似"
+        : check.status === "timeout"
+          ? "HKJC 逾時"
+          : check.status === "error"
+            ? "HKJC 失敗"
+            : "HKJC 未見");
   return `<span class="hkjc-match-badge ${escapeHtml(check.status || "checking")}" title="${escapeHtml(title)}">${escapeHtml(label)}${escapeHtml(score)}${escapeHtml(pools)}</span>`;
 }
 
@@ -1949,6 +1961,7 @@ function renderMatchList(matches, options = {}) {
 
 async function checkLoadedMatchesInHkjc(matches, options = {}) {
   if (!matches.length) return;
+  const runId = options.runId || state.hkjcMatchCheckRunId;
   const requestMatches = matches.map((match) => ({
     matchId: match.matchId,
     league: match.league,
@@ -1983,6 +1996,7 @@ async function checkLoadedMatchesInHkjc(matches, options = {}) {
     if ((body.data.errors?.length || 0) && !body.data.hkjcOpenMatches) {
       throw new Error(`HKJC 檢查失敗：${body.data.errors[0]?.error || "未能取得 HKJC 場次"}`);
     }
+    if (runId !== state.hkjcMatchCheckRunId) return state.loadedMatches;
     state.hkjcMatchCheck = body.data;
     const checksById = new Map((body.data.checks || []).map((check) => [String(check.matchId), check]));
     const updatedMatches = state.loadedMatches.map((match) => ({
@@ -1999,6 +2013,7 @@ async function checkLoadedMatchesInHkjc(matches, options = {}) {
     setStatus(open || possible ? `HKJC 已對照 ${open}+${possible}` : "完成");
     return updatedMatches;
   } catch (error) {
+    if (runId !== state.hkjcMatchCheckRunId) return state.loadedMatches;
     state.hkjcMatchCheck = {
       error: error.message,
       checks: [],
@@ -2019,8 +2034,44 @@ async function checkLoadedMatchesInHkjc(matches, options = {}) {
   }
 }
 
+function clearHkjcCheckTimer() {
+  if (state.hkjcMatchCheckTimer) {
+    window.clearTimeout(state.hkjcMatchCheckTimer);
+    state.hkjcMatchCheckTimer = null;
+  }
+}
+
+function markHkjcCheckTimedOut(runId, message = "HKJC 檢查逾時，請稍後再試") {
+  if (runId !== state.hkjcMatchCheckRunId) return;
+  const hasChecking = state.loadedMatches.some((match) => match.hkjcCheck?.status === "checking");
+  if (!hasChecking) return;
+  clearHkjcCheckTimer();
+  state.hkjcMatchCheckRunId += 1;
+
+  const updatedMatches = state.loadedMatches.map((match) => {
+    if (match.hkjcCheck?.status !== "checking") return match;
+    return {
+      ...match,
+      hkjcCheck: {
+        matchId: match.matchId,
+        status: "timeout",
+        label: "HKJC 逾時",
+        error: message,
+      },
+    };
+  });
+  state.hkjcMatchCheck = {
+    error: message,
+    checks: updatedMatches.map((match) => match.hkjcCheck).filter(Boolean),
+  };
+  renderMatchList(updatedMatches, { preserveSelection: true });
+  setStatus("HKJC 檢查逾時");
+}
+
 async function loadMatches(options = {}) {
   setStatus("載入中");
+  clearHkjcCheckTimer();
+  state.hkjcMatchCheckRunId += 1;
   els.matchList.innerHTML = `<div class="empty">載入賽事中...</div>`;
   setMatchButtons(false);
 
@@ -2051,10 +2102,22 @@ async function loadMatches(options = {}) {
     }
     setStatus("對照 HKJC 中");
     if (!options.skipHkjcAutoCheck) {
-      const checkPromise = checkLoadedMatchesInHkjc(matches, { hours: options.hkjcHours || 72 });
+      const runId = state.hkjcMatchCheckRunId;
+      const timeoutMs = options.hkjcTimeoutMs || 35000;
+      state.hkjcMatchCheckTimer = window.setTimeout(() => {
+        markHkjcCheckTimedOut(runId);
+      }, timeoutMs);
+      const checkPromise = checkLoadedMatchesInHkjc(matches, {
+        hours: options.hkjcHours || 72,
+        timeoutMs: Math.max(5000, timeoutMs - 5000),
+        runId,
+      });
       state.hkjcMatchCheckPromise = checkPromise.finally(() => {
         if (state.hkjcMatchCheckPromise === checkPromise) {
           state.hkjcMatchCheckPromise = null;
+        }
+        if (runId === state.hkjcMatchCheckRunId) {
+          clearHkjcCheckTimer();
         }
       });
       if (options.awaitHkjc) {
@@ -2067,6 +2130,7 @@ async function loadMatches(options = {}) {
     state.loadedMatchesById = new Map();
     state.hkjcMatchCheck = null;
     state.hkjcMatchCheckPromise = null;
+    clearHkjcCheckTimer();
     els.matchList.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
     if (options.rethrow) throw error;

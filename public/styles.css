@@ -485,7 +485,8 @@ button.subtle-primary {
   color: var(--warn);
 }
 
-.hkjc-match-badge.error {
+.hkjc-match-badge.error,
+.hkjc-match-badge.timeout {
   border-color: #f5b5ae;
   background: var(--red-soft);
   color: var(--red);
