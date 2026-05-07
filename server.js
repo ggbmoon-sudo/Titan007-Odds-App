@@ -444,6 +444,7 @@ const server = http.createServer(async (req, res) => {
         hours: Number(body.hours || 72),
         possibleThreshold: Number(body.possibleThreshold || 58),
         openThreshold: Number(body.openThreshold || 72),
+        timeoutMs: Number(body.timeoutMs || 15000),
       });
       sendJson(res, 200, { ok: true, data });
       return;

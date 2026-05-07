@@ -732,19 +732,34 @@ async function getJson(url) {
   return body;
 }
 
-async function postJson(url, payload) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  const body = await response.json();
-  if (!response.ok || !body.ok) {
-    throw new Error(body.error || `HTTP ${response.status}`);
+async function postJson(url, payload, options = {}) {
+  const controller = options.timeoutMs ? new AbortController() : null;
+  const timeout = controller
+    ? window.setTimeout(() => controller.abort(), Math.max(1000, options.timeoutMs))
+    : null;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller?.signal,
+    });
+    const body = await response.json();
+    if (!response.ok || !body.ok) {
+      throw new Error(body.error || `HTTP ${response.status}`);
+    }
+    return body;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(options.timeoutMessage || `請求逾時 (${Math.round(options.timeoutMs / 1000)}秒)`);
+    }
+    throw error;
+  } finally {
+    if (timeout) window.clearTimeout(timeout);
   }
-  return body;
 }
 
 function escapeHtml(value) {
@@ -1937,19 +1952,37 @@ async function checkLoadedMatchesInHkjc(matches, options = {}) {
   const requestMatches = matches.map((match) => ({
     matchId: match.matchId,
     league: match.league,
+    leagueSimplified: match.leagueSimplified,
+    leagueTraditional: match.leagueTraditional,
     kickoffTime: match.kickoffTime,
     state: match.state,
     home: match.home,
+    homeSimplified: match.homeSimplified,
+    homeTraditional: match.homeTraditional,
     away: match.away,
+    awaySimplified: match.awaySimplified,
+    awayTraditional: match.awayTraditional,
   }));
 
   try {
-    const body = await postJson("/api/hkjc-match-check", {
-      hours: options.hours || 72,
-      possibleThreshold: options.possibleThreshold,
-      openThreshold: options.openThreshold,
-      matches: requestMatches,
-    });
+    const timeoutMs = options.timeoutMs || 30000;
+    const body = await postJson(
+      "/api/hkjc-match-check",
+      {
+        hours: options.hours || 72,
+        possibleThreshold: options.possibleThreshold,
+        openThreshold: options.openThreshold,
+        timeoutMs: Math.max(5000, Math.min(timeoutMs - 5000, 20000)),
+        matches: requestMatches,
+      },
+      {
+        timeoutMs,
+        timeoutMessage: "HKJC 檢查逾時，請稍後再試",
+      }
+    );
+    if ((body.data.errors?.length || 0) && !body.data.hkjcOpenMatches) {
+      throw new Error(`HKJC 檢查失敗：${body.data.errors[0]?.error || "未能取得 HKJC 場次"}`);
+    }
     state.hkjcMatchCheck = body.data;
     const checksById = new Map((body.data.checks || []).map((check) => [String(check.matchId), check]));
     const updatedMatches = state.loadedMatches.map((match) => ({

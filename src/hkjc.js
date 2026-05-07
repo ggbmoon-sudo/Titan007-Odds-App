@@ -98,7 +98,19 @@ function postGraphql(body, options = {}) {
   const timeoutMs = options.timeoutMs || 20000;
 
   return new Promise((resolve, reject) => {
-    const req = https.request(
+    let settled = false;
+    let req;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimer);
+      callback(value);
+    };
+    const hardTimer = setTimeout(() => {
+      if (req) req.destroy(new Error("Timeout while fetching HKJC odds"));
+    }, timeoutMs);
+
+    req = https.request(
       HKJC_GRAPHQL_URL,
       {
         method: "POST",
@@ -122,19 +134,19 @@ function postGraphql(body, options = {}) {
             const text = decodeResponse(Buffer.concat(chunks), res.headers["content-encoding"]);
             const json = JSON.parse(text);
             if (json.errors?.length) {
-              reject(new Error(json.errors.map((error) => error.message).join(" | ")));
+              finish(reject, new Error(json.errors.map((error) => error.message).join(" | ")));
               return;
             }
-            resolve(json);
+            finish(resolve, json);
           } catch (error) {
-            reject(error);
+            finish(reject, error);
           }
         });
       }
     );
 
     req.on("timeout", () => req.destroy(new Error("Timeout while fetching HKJC odds")));
-    req.on("error", reject);
+    req.on("error", (error) => finish(reject, error));
     req.end(payload);
   });
 }
@@ -143,24 +155,27 @@ async function fetchHkjcPool(poolKey, options = {}) {
   const config = HKJC_POOLS[poolKey];
   if (!config) throw new Error(`Unsupported HKJC pool ${poolKey}`);
 
-  const response = await postGraphql({
-    query: HKJC_MATCH_QUERY,
-    variables: {
-      startIndex: 0,
-      endIndex: 200,
-      startDate: null,
-      endDate: null,
-      matchIds: Array.isArray(options.matchIds) ? options.matchIds : null,
-      tournIds: null,
-      fbOddsTypes: config.oddsTypes,
-      fbOddsTypesM: config.oddsTypes,
-      inplayOnly: Boolean(options.inplayOnly),
-      featuredMatchesOnly: false,
-      frontEndIds: Array.isArray(options.frontEndIds) ? options.frontEndIds : null,
-      earlySettlementOnly: false,
-      showAllMatch: Boolean(options.showAllMatch),
+  const response = await postGraphql(
+    {
+      query: HKJC_MATCH_QUERY,
+      variables: {
+        startIndex: 0,
+        endIndex: 200,
+        startDate: null,
+        endDate: null,
+        matchIds: Array.isArray(options.matchIds) ? options.matchIds : null,
+        tournIds: null,
+        fbOddsTypes: config.oddsTypes,
+        fbOddsTypesM: config.oddsTypes,
+        inplayOnly: Boolean(options.inplayOnly),
+        featuredMatchesOnly: false,
+        frontEndIds: Array.isArray(options.frontEndIds) ? options.frontEndIds : null,
+        earlySettlementOnly: false,
+        showAllMatch: Boolean(options.showAllMatch),
+      },
     },
-  });
+    { timeoutMs: options.timeoutMs || 20000 }
+  );
 
   return response.data?.matches || [];
 }
@@ -548,6 +563,7 @@ function hkjcOpenRecord(match, poolKeys) {
 async function fetchHkjcOpenMatches(options = {}) {
   const poolKeys = options.poolKeys || ["HAD", "FHA", "HHA", "HIL", "FHL"];
   const hours = Number(options.hours || 72);
+  const poolTimeoutMs = Number(options.poolTimeoutMs || options.timeoutMs || 15000);
   const startTime = options.now ? new Date(options.now) : new Date();
   const endTime = new Date(startTime.getTime() + Math.max(1, hours) * 60 * 60 * 1000);
   const matchesById = new Map();
@@ -556,7 +572,7 @@ async function fetchHkjcOpenMatches(options = {}) {
   const results = await Promise.all(
     poolKeys.map(async (poolKey) => {
       try {
-        return { poolKey, matches: await fetchHkjcPool(poolKey), error: "" };
+        return { poolKey, matches: await fetchHkjcPool(poolKey, { timeoutMs: poolTimeoutMs }), error: "" };
       } catch (error) {
         return { poolKey, matches: [], error: error.message || String(error) };
       }
