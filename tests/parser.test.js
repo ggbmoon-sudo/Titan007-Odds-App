@@ -1280,6 +1280,40 @@ test("HKJC match checker applies team alias groups across all compared matches",
   assert.ok(check.score >= 90);
 });
 
+test("HKJC match checker matches Titan Chinese names against HKJC English names", () => {
+  const hkjcMatch = {
+    matchId: "h7",
+    frontEndId: "FB8973",
+    kickOffTime: "2026-05-08T08:00:00.000+08:00",
+    status: "PREEVENT",
+    tournament: "南美自由盃",
+    tournamentEn: "Copa Libertadores",
+    home: "",
+    homeEn: "Coquimbo Unido",
+    away: "",
+    awayEn: "Universitario Deportes",
+    poolTypes: ["HAD", "HIL"],
+    pools: [{ pool: "HAD", status: "SELLINGSTARTED" }],
+  };
+
+  const check = hkjcInternals.compareTitanMatchToHkjc(
+    {
+      matchId: "2963558",
+      league: "解放者杯",
+      kickoffTime: "08:00",
+      home: "科金博",
+      away: "秘魯體育大學",
+    },
+    [hkjcMatch]
+  );
+
+  assert.equal(check.status, "open");
+  assert.equal(check.matched.frontEndId, "FB8973");
+  assert.ok(check.score >= 90);
+  assert.equal(check.homeScore, 100);
+  assert.equal(check.awayScore, 100);
+});
+
 test("HKJC match checker keeps same-time wrong teams below possible threshold", () => {
   const hkjcMatch = {
     matchId: "h4",

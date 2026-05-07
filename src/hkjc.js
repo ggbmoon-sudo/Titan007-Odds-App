@@ -193,9 +193,15 @@ function baseMatch(match) {
     kickOffTime: match.kickOffTime || "",
     status: match.status || "",
     tournament: match.tournament?.name_ch || match.tournament?.name_en || "",
+    tournamentCh: match.tournament?.name_ch || "",
+    tournamentEn: match.tournament?.name_en || "",
     tournamentCode: match.tournament?.code || "",
     home: match.homeTeam?.name_ch || match.homeTeam?.name_en || "",
+    homeCh: match.homeTeam?.name_ch || "",
+    homeEn: match.homeTeam?.name_en || "",
     away: match.awayTeam?.name_ch || match.awayTeam?.name_en || "",
+    awayCh: match.awayTeam?.name_ch || "",
+    awayEn: match.awayTeam?.name_en || "",
   };
 }
 
@@ -273,11 +279,20 @@ const COMPETITION_ALIAS_GROUPS = [
 const TEAM_ALIAS_GROUPS = [
   ["費雷堡", "弗賴堡", "弗赖堡", "freiburg"],
   ["普拉騰斯", "普拉坦斯", "CA普拉坦斯", "platense"],
+  ["彭拿路", "佩纳罗尔", "penarol"],
   ["科金博", "哥甘保", "coquimbo", "coquimbo unido"],
+  ["秘魯體育大學", "秘鲁体育大学", "universitario", "universitario deportes"],
+  ["伯明翰軍團", "伯明翰军团", "birmingham legion"],
   ["奧特黎獨立", "曼特寧獨立", "麥德林獨立", "麦德林独立", "independiente medellin"],
+  ["法林明高", "弗拉门戈", "flamengo"],
+  ["邦明", "布鲁明", "blooming"],
   ["波坦奴", "波特諾", "波特诺山丘", "cerro porteno"],
+  ["青年體育會", "巴兰基亚青年", "atletico junior", "junior barranquilla"],
   ["卡拉波波", "卡拉保保", "carabobo"],
-  ["巴拉干天奴", "巴拉干天奴紅牛", "布拉干蒂诺RB", "bragantino", "red bull bragantino"],
+  ["河床", "river plate"],
+  ["巴拉干天奴", "巴拉干天奴紅牛", "布拉干蒂诺RB", "bragantino", "rb bragantino", "red bull bragantino"],
+  ["奧希金斯", "希金斯", "o higgins", "ohiggins"],
+  ["聖保羅", "圣保罗", "sao paulo"],
   ["FC邁亞密", "邁亞密FC", "迈阿密FC", "miami fc"],
 ];
 
@@ -396,8 +411,11 @@ function teamNameCandidates(match, side) {
   const team = match[`${prefix}Team`] || {};
   return uniqueTeamNames([
     match[prefix],
+    match[`${prefix}Ch`],
+    match[`${prefix}En`],
     match[`${prefix}Simplified`],
     match[`${prefix}Traditional`],
+    match[`${prefix}English`],
     match[`${prefix}Name`],
     match[`${prefix}_team`],
     team.name_ch,
@@ -449,7 +467,9 @@ function competitionAliases(value) {
 
 function competitionSimilarity(titanMatch, hkjcMatch) {
   const titan = normalizeCompetitionName(titanMatch?.league || titanMatch?.tournament || "");
-  const hkjc = normalizeCompetitionName(hkjcMatch?.tournament || hkjcMatch?.league || "");
+  const hkjc = normalizeCompetitionName(
+    hkjcMatch?.tournament || hkjcMatch?.tournamentCh || hkjcMatch?.tournamentEn || hkjcMatch?.league || ""
+  );
   if (!titan || !hkjc) return 0.5;
   if (titan === hkjc || titan.includes(hkjc) || hkjc.includes(titan)) return 1;
 
