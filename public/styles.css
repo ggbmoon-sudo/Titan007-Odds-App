@@ -709,8 +709,35 @@ td.muted,
   font-size: 12px;
 }
 
-.inline-errors div + div {
+.inline-error-item + .inline-error-item {
   margin-top: 4px;
+}
+
+.inline-error-item {
+  display: grid;
+  gap: 4px;
+}
+
+.inline-error-item em {
+  color: var(--text);
+  font-style: normal;
+}
+
+.error-detail summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.error-detail pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface);
+  white-space: pre-wrap;
 }
 
 .analysis-output {

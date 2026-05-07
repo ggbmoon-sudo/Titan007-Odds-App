@@ -17,7 +17,7 @@ const ANALYSIS_TIMEOUT_MS = 600000;
 const TEST_TIMEOUT_MS = 300000;
 const AI_RETRY_DELAY_MS = 2500;
 const ANALYSIS_RETRY_COUNT = 1;
-const USE_STREAMING_CHAT = true;
+const USE_STREAMING_CHAT = false;
 const GUIDE_STATUS_HEADINGS_LIMIT = 18;
 const STRUCTURED_SCHEMA_VERSION = "odds-analysis-v1";
 const SINGLE_MATCH_REQUIRED_OUTPUT_KEYS = [
@@ -1340,6 +1340,7 @@ async function analyzeOddsPayload(options = {}) {
   const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl || DEFAULT_API_BASE_URL);
   const payload = options.payload || {};
   const isGeminiMode = apiMode === "gemini" || apiMode === "gemini_bearer";
+  const useStreamingChat = Boolean(options.stream ?? USE_STREAMING_CHAT);
   const url =
     apiMode === "gemini"
       ? geminiGenerateContentUrl(apiBaseUrl, model, apiKey)
@@ -1358,7 +1359,7 @@ async function analyzeOddsPayload(options = {}) {
           {
             model,
             messages,
-            stream: USE_STREAMING_CHAT,
+            stream: useStreamingChat,
             max_completion_tokens: maxCompletionTokens,
           },
           apiKey,
@@ -1415,6 +1416,7 @@ async function testAiConnection(options = {}) {
   const apiMode = normalizeApiMode(options.apiMode);
   const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl || DEFAULT_API_BASE_URL);
   const isGeminiMode = apiMode === "gemini" || apiMode === "gemini_bearer";
+  const useStreamingChat = Boolean(options.stream ?? USE_STREAMING_CHAT);
   const url =
     apiMode === "gemini"
       ? geminiGenerateContentUrl(apiBaseUrl, model, apiKey)
@@ -1439,7 +1441,7 @@ async function testAiConnection(options = {}) {
           url,
           {
             model,
-            stream: USE_STREAMING_CHAT,
+            stream: useStreamingChat,
             messages: testMessages,
           },
           apiKey,

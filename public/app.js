@@ -123,6 +123,7 @@ const els = {
   aiBaseUrlInput: document.getElementById("aiBaseUrlInput"),
   aiModelInput: document.getElementById("aiModelInput"),
   aiApiModeInput: document.getElementById("aiApiModeInput"),
+  aiStreamInput: document.getElementById("aiStreamInput"),
   promptVersionLabel: document.getElementById("promptVersionLabel"),
   aiKeyInput: document.getElementById("aiKeyInput"),
   rememberKeyInput: document.getElementById("rememberKeyInput"),
@@ -1298,6 +1299,32 @@ function activeSectionEntries(tab) {
   return { entries, errors };
 }
 
+function summarizeTechnicalError(error) {
+  const text = String(error || "").replace(/\s+/g, " ").trim();
+  if (!text) return "未知錯誤";
+  const urls = [...new Set((text.match(/https?:\/\/[^\s|)]+/g) || []).map((url) => url.replace(/[.,;]+$/, "")))];
+  const urlHint = urls[0] ? ` (${urls[0]})` : "";
+  const http = text.match(/\bHTTP\s+\d{3}\b/i)?.[0];
+  if (/timed out|timeout|逾時/i.test(text)) return `${http || "請求逾時"}${urlHint}`;
+  if (/socket hang up|ECONNRESET|connection reset/i.test(text)) return `連線中斷${urlHint}`;
+  if (/error page|returned an error/i.test(text)) return `Titan007 回傳錯誤頁${urlHint}`;
+  if (/no Europe rows/i.test(text)) return `歐洲賠率未有可解析資料${urlHint}`;
+  if (/no odds table|找不到 odds table/i.test(text)) return `找不到盤口表格${urlHint}`;
+  if (http) return `${http}${urlHint}`;
+  return text.length > 140 ? `${text.slice(0, 140)}...` : text;
+}
+
+function renderErrorDetail(error) {
+  const text = String(error || "").trim();
+  if (!text || text.length <= 160) return "";
+  return `
+    <details class="error-detail">
+      <summary>詳細錯誤</summary>
+      <pre>${escapeHtml(text)}</pre>
+    </details>
+  `;
+}
+
 function renderErrors(errors) {
   if (!errors.length) return "";
 
@@ -1305,12 +1332,17 @@ function renderErrors(errors) {
     <div class="inline-errors">
       ${errors
         .map(
-          (item) => `
-            <div>
+          (item) => {
+            const summary = summarizeTechnicalError(item.error);
+            return `
+            <div class="inline-error-item">
               <strong>${escapeHtml(item.match?.matchId || item.pool || "")}</strong>
-              ${escapeHtml(item.match ? matchTitle(item.match) : item.pool || "")} · ${escapeHtml(item.error)}
+              <span>${escapeHtml(item.match ? matchTitle(item.match) : item.pool || "")}</span>
+              <em>${escapeHtml(summary)}</em>
+              ${renderErrorDetail(item.error)}
             </div>
-          `
+          `;
+          }
         )
         .join("")}
     </div>
@@ -3999,6 +4031,7 @@ async function postAiAnalyzeRequest(payload, apiKey) {
     apiBaseUrl: els.aiBaseUrlInput.value.trim(),
     model: els.aiModelInput.value.trim(),
     apiMode: els.aiApiModeInput?.value || "openai",
+    stream: Boolean(els.aiStreamInput?.checked),
     apiKey,
     payload,
   });
@@ -4433,6 +4466,7 @@ async function testAiConnection() {
       apiBaseUrl: els.aiBaseUrlInput.value.trim(),
       model: els.aiModelInput.value.trim(),
       apiMode: els.aiApiModeInput?.value || "openai",
+      stream: Boolean(els.aiStreamInput?.checked),
       apiKey,
     });
     state.aiTest = {
@@ -4813,6 +4847,10 @@ els.aiModelInput.addEventListener("input", () => {
   updateDebugLights();
 });
 els.aiApiModeInput?.addEventListener("change", () => {
+  state.aiTest = null;
+  updateDebugLights();
+});
+els.aiStreamInput?.addEventListener("change", () => {
   state.aiTest = null;
   updateDebugLights();
 });
