@@ -3,8 +3,8 @@ const http = require("node:http");
 const https = require("node:https");
 const path = require("node:path");
 
-const DEFAULT_API_BASE_URL = "https://liangjiewis.com/v1";
-const DEFAULT_MODEL = "gemini-3.1-pro-preview-thinking";
+const DEFAULT_API_BASE_URL = "https://qweapi.com/v1";
+const DEFAULT_MODEL = "gpt-5.5";
 const REPO_ROOT = path.join(__dirname, "..");
 const DEFAULT_GUIDE_PATH =
   process.env.ANALYSIS_GUIDE_PATH || path.join(REPO_ROOT, "AI_JSONL欄位說明.md");

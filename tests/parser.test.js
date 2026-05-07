@@ -178,18 +178,18 @@ test("Titan V guess index parser keeps all target-league rows with hidden values
   assert.equal(parsed.matches[0].hot, true);
 });
 
-test("AI chat completions URL accepts Liangjie root, base, and full endpoint", () => {
+test("AI chat completions URL accepts qweapi root, base, and full endpoint", () => {
   assert.equal(
-    aiInternals.chatCompletionsUrl("https://liangjiewis.com").toString(),
-    "https://liangjiewis.com/v1/chat/completions"
+    aiInternals.chatCompletionsUrl("https://qweapi.com").toString(),
+    "https://qweapi.com/v1/chat/completions"
   );
   assert.equal(
-    aiInternals.chatCompletionsUrl("https://liangjiewis.com/v1").toString(),
-    "https://liangjiewis.com/v1/chat/completions"
+    aiInternals.chatCompletionsUrl("https://qweapi.com/v1").toString(),
+    "https://qweapi.com/v1/chat/completions"
   );
   assert.equal(
-    aiInternals.chatCompletionsUrl("https://liangjiewis.com/v1/chat/completions").toString(),
-    "https://liangjiewis.com/v1/chat/completions"
+    aiInternals.chatCompletionsUrl("https://qweapi.com/v1/chat/completions").toString(),
+    "https://qweapi.com/v1/chat/completions"
   );
 });
 
@@ -449,18 +449,18 @@ test("AI input preview exposes the actual single-match prompt JSON", () => {
 });
 
 test("AI Gemini native URL redacts query key for display", () => {
-  const url = aiInternals.geminiGenerateContentUrl("https://liangjiewis.com", "gemini-2.5-flash", "sk-secret");
-  assert.equal(url.toString(), "https://liangjiewis.com/v1/models/gemini-2.5-flash:generateContent?key=sk-secret");
+  const url = aiInternals.geminiGenerateContentUrl("https://qweapi.com", "gemini-2.5-flash", "sk-secret");
+  assert.equal(url.toString(), "https://qweapi.com/v1/models/gemini-2.5-flash:generateContent?key=sk-secret");
   assert.equal(
     aiInternals.redactApiKeyFromUrl(url),
-    "https://liangjiewis.com/v1/models/gemini-2.5-flash:generateContent?key=sk-***"
+    "https://qweapi.com/v1/models/gemini-2.5-flash:generateContent?key=sk-***"
   );
 
-  const bearerUrl = aiInternals.geminiGenerateContentUrl("https://liangjiewis.com", "gemini-2.5-flash", "sk-secret", {
+  const bearerUrl = aiInternals.geminiGenerateContentUrl("https://qweapi.com", "gemini-2.5-flash", "sk-secret", {
     version: "v1beta",
     keyInQuery: false,
   });
-  assert.equal(bearerUrl.toString(), "https://liangjiewis.com/v1beta/models/gemini-2.5-flash:generateContent");
+  assert.equal(bearerUrl.toString(), "https://qweapi.com/v1beta/models/gemini-2.5-flash:generateContent");
 });
 
 test("parseLiveMatches reads Titan007 A records", () => {
