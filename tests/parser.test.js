@@ -1190,6 +1190,96 @@ test("HKJC match checker fuzzy-matches Titan teams and flags opened pools", () =
   assert.equal(hkjcInternals.normalizeTeamName("Arsenal FC"), "arsenal");
 });
 
+test("HKJC match checker uses Titan translated team aliases", () => {
+  const hkjcMatch = {
+    matchId: "h2",
+    frontEndId: "FB8939",
+    kickOffTime: "2026-05-08T03:00:00.000+08:00",
+    status: "PREEVENT",
+    tournament: "歐霸盃",
+    home: "弗賴堡",
+    away: "布拉加",
+    poolTypes: ["HAD", "HIL"],
+    pools: [{ pool: "HAD", status: "SELLINGSTARTED" }],
+  };
+
+  const check = hkjcInternals.compareTitanMatchToHkjc(
+    {
+      matchId: "2976658",
+      league: "歐霸盃",
+      kickoffTime: "03:00",
+      home: "費雷堡",
+      homeSimplified: "弗赖堡",
+      homeTraditional: "費雷堡",
+      away: "布拉加",
+    },
+    [hkjcMatch]
+  );
+
+  assert.equal(check.status, "open");
+  assert.equal(check.matched.frontEndId, "FB8939");
+  assert.ok(check.score >= 90);
+});
+
+test("HKJC match checker tolerates club prefixes and one-character transliteration drift", () => {
+  const hkjcMatch = {
+    matchId: "h3",
+    frontEndId: "FB8971",
+    kickOffTime: "2026-05-08T06:00:00.000+08:00",
+    status: "PREEVENT",
+    tournament: "南美自由盃",
+    home: "CA普拉坦斯",
+    away: "彭拿路",
+    poolTypes: ["HAD", "HIL"],
+    pools: [{ pool: "HAD", status: "SELLINGSTARTED" }],
+  };
+
+  const check = hkjcInternals.compareTitanMatchToHkjc(
+    {
+      matchId: "2963567",
+      league: "解放者杯",
+      kickoffTime: "06:00",
+      home: "普拉騰斯",
+      away: "彭拿路",
+    },
+    [hkjcMatch]
+  );
+
+  assert.equal(check.status, "open");
+  assert.equal(check.matched.frontEndId, "FB8971");
+  assert.ok(check.score >= 85);
+  assert.equal(hkjcInternals.normalizeTeamName("CA普拉坦斯"), "普拉坦斯");
+});
+
+test("HKJC match checker keeps same-time wrong teams below possible threshold", () => {
+  const hkjcMatch = {
+    matchId: "h4",
+    frontEndId: "FB8964",
+    kickOffTime: "2026-05-08T03:00:00.000+08:00",
+    status: "PREEVENT",
+    tournament: "歐霸盃",
+    home: "阿士東維拉",
+    away: "諾定咸森林",
+    poolTypes: ["HAD", "HIL"],
+    pools: [{ pool: "HAD", status: "SELLINGSTARTED" }],
+  };
+
+  const check = hkjcInternals.compareTitanMatchToHkjc(
+    {
+      matchId: "2976658",
+      league: "歐霸盃",
+      kickoffTime: "03:00",
+      home: "費雷堡",
+      homeSimplified: "弗赖堡",
+      away: "布拉加",
+    },
+    [hkjcMatch]
+  );
+
+  assert.equal(check.status, "not_found");
+  assert.ok(check.score < 58);
+});
+
 test("HKJC match checker short-circuits empty Titan lists", async () => {
   const { checkTitanMatchesInHkjc } = require("../src/hkjc");
   const result = await checkTitanMatchesInHkjc({ matches: [] });

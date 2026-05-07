@@ -184,14 +184,93 @@ function baseMatch(match) {
   };
 }
 
-function normalizeTeamName(value) {
+const TEXT_FOLD_MAP = {
+  亞: "亚",
+  盃: "杯",
+  會: "会",
+  聯: "联",
+  隊: "队",
+  賽: "赛",
+  國: "国",
+  聖: "圣",
+  奧: "奥",
+  費: "费",
+  賴: "赖",
+  頓: "顿",
+  騰: "腾",
+  學: "学",
+  馬: "马",
+  羅: "罗",
+  爾: "尔",
+  納: "纳",
+  倫: "伦",
+  華: "华",
+  達: "达",
+  維: "维",
+  貝: "贝",
+  門: "门",
+  莊: "庄",
+  頭: "头",
+  龍: "龙",
+  麥: "麦",
+  魯: "鲁",
+  蘭: "兰",
+  諾: "诺",
+  薩: "萨",
+  歐: "欧",
+  擊: "击",
+  體: "体",
+  運: "运",
+  務: "务",
+  萊: "莱",
+  堅: "坚",
+  錫: "锡",
+  領: "领",
+  萬: "万",
+  當: "当",
+};
+
+const CLUB_PREFIXES = [
+  "ca",
+  "cd",
+  "cf",
+  "fc",
+  "sc",
+  "ac",
+  "afc",
+  "cs",
+  "ec",
+  "fk",
+  "club",
+  "clubatletico",
+  "deportivo",
+  "universidad",
+];
+
+const COMPETITION_ALIAS_GROUPS = [
+  ["解放者杯", "南美自由杯", "南美自由盃", "libertadores", "copa libertadores"],
+  ["南美杯", "南美盃", "南美球会杯", "南美球會盃", "sudamericana", "copa sudamericana"],
+  ["欧霸杯", "歐霸盃", "欧罗巴杯", "歐羅巴盃", "欧洲联赛", "歐洲聯賽", "europa league"],
+  ["欧会杯", "歐會盃", "欧洲协会联赛", "歐洲協會聯賽", "conference league"],
+  ["日职联", "日職聯", "日职百年构想联赛", "日職百年構想聯賽", "j1 league"],
+];
+
+function foldComparableText(value) {
   return String(value || "")
     .normalize("NFKC")
     .toLowerCase()
+    .replace(/[\u4e00-\u9fff]/g, (char) => TEXT_FOLD_MAP[char] || char);
+}
+
+function normalizeTeamName(value) {
+  const clubPrefixPattern = new RegExp(`^(?:${CLUB_PREFIXES.join("|")})(?=[\\u4e00-\\u9fff])`, "i");
+  return foldComparableText(value)
     .replace(/\([^)]*\)/g, "")
     .replace(/（[^）]*）/g, "")
+    .replace(clubPrefixPattern, "")
     .replace(/\b(fc|sc|afc|cf|cd|ac|u19|u20|u21|u23)\b/gi, "")
-    .replace(/足球會|足球俱乐部|足球俱樂部|球會|俱乐部|俱樂部|女子|女足|青年隊|青年队|預備隊|预备队/g, "")
+    .replace(/([\u4e00-\u9fff])(?:fc|sc|afc|cf|cd|ac|fk)$/gi, "$1")
+    .replace(/足球会|足球俱乐部|球会|俱乐部|女子|女足|青年队|预备队/g, "")
     .replace(/[^0-9a-z\u4e00-\u9fff]+/gi, "");
 }
 
@@ -206,7 +285,45 @@ function ngrams(value) {
   return [...new Set(grams)];
 }
 
-function teamSimilarity(left, right) {
+function diceSimilarity(leftItems, rightItems) {
+  if (!leftItems.length || !rightItems.length) return 0;
+  const rightSet = new Set(rightItems);
+  const overlap = leftItems.filter((item) => rightSet.has(item)).length;
+  return (2 * overlap) / (leftItems.length + rightSet.size);
+}
+
+function editDistance(left, right) {
+  const a = [...left];
+  const b = [...right];
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = new Array(b.length + 1);
+
+  for (let row = 1; row <= a.length; row += 1) {
+    current[0] = row;
+    for (let column = 1; column <= b.length; column += 1) {
+      const cost = a[row - 1] === b[column - 1] ? 0 : 1;
+      current[column] = Math.min(
+        previous[column] + 1,
+        current[column - 1] + 1,
+        previous[column - 1] + cost
+      );
+    }
+    for (let column = 0; column <= b.length; column += 1) {
+      previous[column] = current[column];
+    }
+  }
+
+  return previous[b.length];
+}
+
+function editSimilarity(left, right) {
+  if (!left || !right) return 0;
+  const maxLength = Math.max([...left].length, [...right].length);
+  if (!maxLength) return 0;
+  return 1 - editDistance(left, right) / maxLength;
+}
+
+function normalizedSimilarity(left, right) {
   const a = normalizeTeamName(left);
   const b = normalizeTeamName(right);
   if (!a || !b) return 0;
@@ -218,9 +335,96 @@ function teamSimilarity(left, right) {
 
   const gramsA = ngrams(a);
   const gramsB = new Set(ngrams(b));
-  if (!gramsA.length || !gramsB.size) return 0;
-  const overlap = gramsA.filter((gram) => gramsB.has(gram)).length;
-  return (2 * overlap) / (gramsA.length + gramsB.size);
+  const ngramScore = diceSimilarity(gramsA, [...gramsB]);
+  const charScore = diceSimilarity([...new Set([...a])], [...new Set([...b])]);
+  const editScore = editSimilarity(a, b);
+
+  return Math.max(ngramScore, charScore * 0.96, editScore * 0.92);
+}
+
+function uniqueTeamNames(names) {
+  const seen = new Set();
+  const values = [];
+  for (const name of names) {
+    const raw = String(name || "").trim();
+    const normalized = normalizeTeamName(raw);
+    if (!raw || !normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    values.push(raw);
+  }
+  return values;
+}
+
+function teamNameCandidates(match, side) {
+  if (!match) return [];
+  const prefix = side === "away" ? "away" : "home";
+  const team = match[`${prefix}Team`] || {};
+  return uniqueTeamNames([
+    match[prefix],
+    match[`${prefix}Simplified`],
+    match[`${prefix}Traditional`],
+    match[`${prefix}Name`],
+    match[`${prefix}_team`],
+    team.name_ch,
+    team.name_en,
+  ]);
+}
+
+function bestTeamSimilarity(leftNames, rightNames) {
+  let best = 0;
+  for (const left of leftNames) {
+    for (const right of rightNames) {
+      best = Math.max(best, normalizedSimilarity(left, right));
+      if (best >= 1) return 1;
+    }
+  }
+  return best;
+}
+
+function teamSimilarity(left, right) {
+  return bestTeamSimilarity(uniqueTeamNames([left]), uniqueTeamNames([right]));
+}
+
+function sideSimilarity(titanMatch, hkjcMatch, titanSide, hkjcSide) {
+  return bestTeamSimilarity(teamNameCandidates(titanMatch, titanSide), teamNameCandidates(hkjcMatch, hkjcSide));
+}
+
+function normalizeCompetitionName(value) {
+  return foldComparableText(value)
+    .replace(/\([^)]*\)/g, "")
+    .replace(/（[^）]*）/g, "")
+    .replace(/[^0-9a-z\u4e00-\u9fff]+/gi, "");
+}
+
+function competitionAliases(value) {
+  const normalized = normalizeCompetitionName(value);
+  if (!normalized) return new Set();
+  for (const group of COMPETITION_ALIAS_GROUPS) {
+    const normalizedGroup = group.map(normalizeCompetitionName).filter(Boolean);
+    if (
+      normalizedGroup.some(
+        (alias) => normalized === alias || normalized.includes(alias) || alias.includes(normalized)
+      )
+    ) {
+      return new Set(normalizedGroup);
+    }
+  }
+  return new Set([normalized]);
+}
+
+function competitionSimilarity(titanMatch, hkjcMatch) {
+  const titan = normalizeCompetitionName(titanMatch?.league || titanMatch?.tournament || "");
+  const hkjc = normalizeCompetitionName(hkjcMatch?.tournament || hkjcMatch?.league || "");
+  if (!titan || !hkjc) return 0.5;
+  if (titan === hkjc || titan.includes(hkjc) || hkjc.includes(titan)) return 1;
+
+  const titanAliases = competitionAliases(titan);
+  const hkjcAliases = competitionAliases(hkjc);
+  if ([...titanAliases].some((alias) => hkjcAliases.has(alias))) return 1;
+
+  const ngramScore = diceSimilarity(ngrams(titan), ngrams(hkjc));
+  const charScore = diceSimilarity([...new Set([...titan])], [...new Set([...hkjc])]);
+  return Math.max(ngramScore, charScore * 0.9);
 }
 
 function parseTitanTime(match) {
@@ -261,21 +465,23 @@ function timeScore(titanMatch, hkjcMatch) {
 }
 
 function scoreMatchPair(titanMatch, hkjcMatch) {
-  const directHome = teamSimilarity(titanMatch.home, hkjcMatch.home);
-  const directAway = teamSimilarity(titanMatch.away, hkjcMatch.away);
-  const swappedHome = teamSimilarity(titanMatch.home, hkjcMatch.away);
-  const swappedAway = teamSimilarity(titanMatch.away, hkjcMatch.home);
+  const directHome = sideSimilarity(titanMatch, hkjcMatch, "home", "home");
+  const directAway = sideSimilarity(titanMatch, hkjcMatch, "away", "away");
+  const swappedHome = sideSimilarity(titanMatch, hkjcMatch, "home", "away");
+  const swappedAway = sideSimilarity(titanMatch, hkjcMatch, "away", "home");
   const directTeamScore = (directHome + directAway) / 2;
   const swappedTeamScore = (swappedHome + swappedAway) / 2;
   const swapped = swappedTeamScore > directTeamScore;
   const teamScore = Math.max(directTeamScore, swappedTeamScore);
   const kickoffScore = timeScore(titanMatch, hkjcMatch);
-  const score = Math.round((teamScore * 0.82 + kickoffScore * 0.18) * 100);
+  const leagueScore = competitionSimilarity(titanMatch, hkjcMatch);
+  const score = Math.round((teamScore * 0.74 + kickoffScore * 0.18 + leagueScore * 0.08) * 100);
 
   return {
     score,
     teamScore: Math.round(teamScore * 100),
     timeScore: Math.round(kickoffScore * 100),
+    leagueScore: Math.round(leagueScore * 100),
     swapped,
   };
 }
