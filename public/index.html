@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>賠率資料工作台</title>
-    <link rel="stylesheet" href="/styles.css?v=20260507-hkjc-pending">
+    <link rel="stylesheet" href="/styles.css?v=20260508-top10-prematch">
   </head>
   <body>
     <header class="app-header">
@@ -72,6 +72,10 @@
             <button id="extractHkjcEighteenHourBtn" class="wide-action" type="button">提取12-18小時HKJC</button>
           </div>
         </section>
+
+        <div class="match-list" id="matchList">
+          <div class="empty">尚未載入賽事</div>
+        </div>
 
         <section class="tool-section">
           <div class="section-heading">
@@ -146,42 +150,6 @@
             <button id="clearAiKeyBtn" type="button">清除 Key</button>
           </div>
 
-          <div class="debug-lights" id="debugLights">
-            <div class="debug-light pending" id="debugKeyLight">
-              <span></span><strong>API Key</strong><em>未檢查</em>
-            </div>
-            <div class="debug-light pending" id="debugBaseLight">
-              <span></span><strong>Base URL</strong><em>未檢查</em>
-            </div>
-            <div class="debug-light pending" id="debugServerLight">
-              <span></span><strong>Server</strong><em>未檢查</em>
-            </div>
-            <div class="debug-light pending" id="debugTitanLight">
-              <span></span><strong>Titan007</strong><em>未檢查</em>
-            </div>
-            <div class="debug-light pending" id="debugGuideLight">
-              <span></span><strong>MD 框架</strong><em>未檢查</em>
-            </div>
-            <div class="debug-light pending" id="debugPromptLight">
-              <span></span><strong>Prompt</strong><em>未檢查</em>
-            </div>
-            <div class="debug-light pending" id="debugPayloadLight">
-              <span></span><strong>資料量</strong><em>未有</em>
-            </div>
-            <div class="debug-light pending" id="debugJsonLight">
-              <span></span><strong>JSON</strong><em>未有</em>
-            </div>
-            <div class="debug-light pending" id="debugTimeoutLight">
-              <span></span><strong>延遲</strong><em>未有</em>
-            </div>
-            <div class="debug-light pending" id="debugAiLight">
-              <span></span><strong>AI</strong><em>未測試</em>
-            </div>
-            <div class="debug-light pending" id="debugLastLight">
-              <span></span><strong>最後回應</strong><em>未有</em>
-            </div>
-          </div>
-
           <label>
             指定場次
             <select id="aiTargetMatchSelect">
@@ -225,6 +193,50 @@
             <button id="clearApiFootballKeyBtn" type="button">清除 Key</button>
           </div>
 
+        </section>
+
+        <section class="tool-section diagnostics-section">
+          <div class="section-heading">
+            <span>05</span>
+            <h2>狀態燈</h2>
+          </div>
+
+          <div class="debug-lights" id="debugLights">
+            <div class="debug-light pending" id="debugKeyLight">
+              <span></span><strong>API Key</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugBaseLight">
+              <span></span><strong>Base URL</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugServerLight">
+              <span></span><strong>Server</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugTitanLight">
+              <span></span><strong>Titan007</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugGuideLight">
+              <span></span><strong>MD 框架</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugPromptLight">
+              <span></span><strong>Prompt</strong><em>未檢查</em>
+            </div>
+            <div class="debug-light pending" id="debugPayloadLight">
+              <span></span><strong>資料量</strong><em>未有</em>
+            </div>
+            <div class="debug-light pending" id="debugJsonLight">
+              <span></span><strong>JSON</strong><em>未有</em>
+            </div>
+            <div class="debug-light pending" id="debugTimeoutLight">
+              <span></span><strong>延遲</strong><em>未有</em>
+            </div>
+            <div class="debug-light pending" id="debugAiLight">
+              <span></span><strong>AI</strong><em>未測試</em>
+            </div>
+            <div class="debug-light pending" id="debugLastLight">
+              <span></span><strong>最後回應</strong><em>未有</em>
+            </div>
+          </div>
+
           <div class="debug-lights compact-debug">
             <div class="debug-light pending" id="debugContextLight">
               <span></span><strong>Context</strong><em>未有</em>
@@ -237,10 +249,6 @@
             </div>
           </div>
         </section>
-
-        <div class="match-list" id="matchList">
-          <div class="empty">尚未載入賽事</div>
-        </div>
       </aside>
 
       <section class="content-panel">
@@ -371,6 +379,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260507-hkjc-pending"></script>
+    <script src="/app.js?v=20260508-top10-prematch"></script>
   </body>
 </html>

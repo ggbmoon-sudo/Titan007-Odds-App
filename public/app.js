@@ -33,6 +33,8 @@ const state = {
 const AI_KEY_STORAGE_KEY = "odds-workbench.ai-api-key";
 const API_FOOTBALL_KEY_STORAGE_KEY = "odds-workbench.api-football-key";
 const EXTRACTION_DEEP_MODE_STORAGE_KEY = "odds-workbench.extraction-deep-mode";
+const EXTRACTION_WORKER_COUNT_STORAGE_KEY = "odds-workbench.worker-count";
+const PROBABILITY_WINDOW_STORAGE_KEY = "odds-workbench.probability-window";
 const AI_HISTORY_STORAGE_KEY = "odds-workbench.ai-history";
 const BACKTEST_STORAGE_KEY = "odds-workbench.backtest-records";
 const MAX_HISTORY_ITEMS = 25;
@@ -41,7 +43,7 @@ const MAX_AI_ROWS = 800;
 const BATCH_EXTRACT_LIMIT = 25;
 const HKJC_OPEN_EXTRACT_WINDOW_HOURS = 6;
 const HKJC_EXTRACT_MIN_MATCH_SCORE = 50;
-const AI_PROMPT_VERSION = "global-scan-lite-single-match-v3";
+const AI_PROMPT_VERSION = "global-scan-lite-single-match-v4";
 const AI_STRUCTURED_SCHEMA_VERSION = "odds-analysis-v1";
 const CHUNKED_AI_WORKFLOWS = new Set(["top10_ai_ranking", "analyze_current_result"]);
 let aiProgressTimer = null;
@@ -440,14 +442,36 @@ function loadStoredApiFootballKey() {
 }
 
 function loadExtractionOptions() {
-  if (!els.includeMultiInput) return;
-  const saved = loadJsonStorage(EXTRACTION_DEEP_MODE_STORAGE_KEY, null);
-  els.includeMultiInput.checked = saved === null ? false : Boolean(saved);
+  if (els.includeMultiInput) {
+    const savedDeepMode = loadJsonStorage(EXTRACTION_DEEP_MODE_STORAGE_KEY, null);
+    els.includeMultiInput.checked = savedDeepMode === null ? false : Boolean(savedDeepMode);
+  }
+
+  if (els.workerCountInput) {
+    const savedWorkerCount = Number(loadJsonStorage(EXTRACTION_WORKER_COUNT_STORAGE_KEY, null));
+    if (Number.isFinite(savedWorkerCount)) {
+      els.workerCountInput.value = String(Math.max(1, Math.min(Math.trunc(savedWorkerCount), 3)));
+    }
+  }
+
+  if (els.probabilityWindowInput) {
+    const savedWindow = loadJsonStorage(PROBABILITY_WINDOW_STORAGE_KEY, "");
+    if ([...els.probabilityWindowInput.options].some((option) => option.value === savedWindow)) {
+      els.probabilityWindowInput.value = savedWindow;
+    }
+  }
 }
 
 function saveExtractionOptions() {
-  if (!els.includeMultiInput) return;
-  saveJsonStorage(EXTRACTION_DEEP_MODE_STORAGE_KEY, Boolean(els.includeMultiInput.checked));
+  if (els.includeMultiInput) {
+    saveJsonStorage(EXTRACTION_DEEP_MODE_STORAGE_KEY, Boolean(els.includeMultiInput.checked));
+  }
+  if (els.workerCountInput) {
+    saveJsonStorage(EXTRACTION_WORKER_COUNT_STORAGE_KEY, workerCount());
+  }
+  if (els.probabilityWindowInput) {
+    saveJsonStorage(PROBABILITY_WINDOW_STORAGE_KEY, els.probabilityWindowInput.value || "all");
+  }
 }
 
 function includeMultiEnabled() {
@@ -852,6 +876,20 @@ function isNotStartedMatch(match) {
   return true;
 }
 
+function isPrematchTop10Candidate(match, now = new Date()) {
+  const code = String(match?.stateCode ?? "").trim();
+  if (code) return code === "0";
+
+  if (!isNotStartedMatch(match)) return false;
+
+  const kickoff = parseMatchKickoffTime(match);
+  if (kickoff && Number.isFinite(kickoff.getTime())) {
+    return kickoff.getTime() >= now.getTime() - 5 * 60 * 1000;
+  }
+
+  return true;
+}
+
 function isWithinUpcomingHourRange(match, startHours, endHours, now = new Date()) {
   const kickoff = parseMatchKickoffTime(match);
   if (!kickoff || !Number.isFinite(kickoff.getTime())) return false;
@@ -949,21 +987,22 @@ function contextMatches() {
 function batchItems() {
   if (state.batch) {
     return (state.batch.results || [])
-      .filter((result) => result.ok && result.data)
-      .map((result) => ({
-        data: result.data,
-        match: { ...matchById(result.matchId), ...(result.match || {}) },
-      }));
-  }
+        .filter((result) => result.ok && result.data)
+        .map((result) => ({
+          data: result.data,
+          match: { ...matchById(result.matchId), ...(result.data.match || {}), ...(result.match || {}), matchId: result.matchId },
+        }));
+    }
 
-  if (state.data) {
-    return [
-      {
-        data: state.data,
-        match: matchById(state.data.matchId),
-      },
-    ];
-  }
+    if (state.data) {
+      const matchId = state.data.matchId;
+      return [
+        {
+          data: state.data,
+          match: { ...matchById(matchId), ...(state.data.match || {}), matchId },
+        },
+      ];
+    }
 
   return [];
 }
@@ -974,12 +1013,13 @@ function cacheEntryToBatchItem(entry) {
   const matchId = String(result.matchId || result.data.matchId || result.match?.matchId || entry.matchId || "").trim();
   if (!matchId) return null;
   return {
-    data: result.data,
-    match: {
-      ...matchById(matchId),
-      ...(result.match || {}),
-      matchId,
-    },
+      data: result.data,
+      match: {
+        ...matchById(matchId),
+        ...(result.data.match || {}),
+        ...(result.match || {}),
+        matchId,
+      },
     cacheEntry: entry,
   };
 }
@@ -1275,8 +1315,9 @@ function activeSectionEntries(tab) {
   const resolver = sectionForTab(tab);
   const entries = [];
   const errors = [];
+  const warnings = [];
 
-  if (!resolver) return { entries, errors };
+  if (!resolver) return { entries, errors, warnings };
 
   for (const item of batchItems()) {
     const section = resolver(item.data);
@@ -1285,6 +1326,13 @@ function activeSectionEntries(tab) {
         match: item.match,
         sourceUrl: section.sourceUrl || "",
         error: section.error,
+      });
+    }
+    if (section?.missingTargetBookmakerLabels?.length) {
+      warnings.push({
+        match: item.match,
+        coverage: section.coverageLabel || "",
+        missing: section.missingTargetBookmakerLabels,
       });
     }
 
@@ -1296,7 +1344,7 @@ function activeSectionEntries(tab) {
     }
   }
 
-  return { entries, errors };
+  return { entries, errors, warnings };
 }
 
 function summarizeTechnicalError(error) {
@@ -1325,6 +1373,18 @@ function renderErrorDetail(error) {
   `;
 }
 
+function renderTechnicalErrorBox(title, error) {
+  const text = error?.message || String(error || "");
+  const summary = summarizeTechnicalError(text);
+  return `
+    <div class="error technical-error-box">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(summary)}</span>
+      ${renderErrorDetail(text)}
+    </div>
+  `;
+}
+
 function renderErrors(errors) {
   if (!errors.length) return "";
 
@@ -1343,6 +1403,32 @@ function renderErrors(errors) {
             </div>
           `;
           }
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderCoverageWarnings(warnings) {
+  const visibleWarnings = warnings
+    .map((item) => ({
+      ...item,
+      missing: (item.missing || []).filter((label) => label !== "立博"),
+    }))
+    .filter((item) => item.missing.length);
+  if (!visibleWarnings.length) return "";
+
+  return `
+    <div class="inline-errors coverage-warnings">
+      ${visibleWarnings
+        .map(
+          (item) => `
+            <div class="inline-error-item">
+              <strong>${escapeHtml(item.match?.matchId || "")}</strong>
+              <span>${escapeHtml(matchTitle(item.match || {}))}</span>
+              <em>${escapeHtml(`莊家覆蓋 ${item.coverage || "-"} · 缺：${(item.missing || []).join("、")}`)}</em>
+            </div>
+          `
         )
         .join("")}
     </div>
@@ -1418,8 +1504,8 @@ function prependProbabilityProgress() {
   }
 }
 
-function renderOddsTable(entries, market, errors = []) {
-  if (!entries.length && !errors.length) {
+function renderOddsTable(entries, market, errors = [], warnings = []) {
+  if (!entries.length && !errors.length && !warnings.length) {
     els.tableWrap.innerHTML = `${renderExtractionProgress()}<div class="empty">此市場未有資料</div>`;
     return;
   }
@@ -1461,6 +1547,7 @@ function renderOddsTable(entries, market, errors = []) {
 
   els.tableWrap.innerHTML = `
     ${renderExtractionProgress()}
+    ${renderCoverageWarnings(warnings)}
     ${renderErrors(errors)}
     <table>
       <thead>
@@ -1572,19 +1659,19 @@ function renderActiveTab() {
     button.classList.toggle("active", button.dataset.tab === state.activeTab);
   }
 
-  const { entries, errors } = activeSectionEntries(state.activeTab);
-  if (!entries.length && !errors.length) {
+  const { entries, errors, warnings } = activeSectionEntries(state.activeTab);
+  if (!entries.length && !errors.length && !warnings.length) {
     els.tableWrap.innerHTML = `<div class="empty">${escapeHtml(TAB_LABELS[state.activeTab] || "此市場")}未有資料</div>`;
     return;
   }
 
   if (state.activeTab.startsWith("asian")) {
-    renderOddsTable(entries, "asian", errors);
+    renderOddsTable(entries, "asian", errors, warnings);
     return;
   }
 
   if (state.activeTab.startsWith("over")) {
-    renderOddsTable(entries, "overUnder", errors);
+    renderOddsTable(entries, "overUnder", errors, warnings);
     return;
   }
 
@@ -2118,7 +2205,7 @@ async function loadMatches(options = {}) {
     let fallbackLeague = "";
     if (league && !body.matches.length) {
       fallbackLeague = league;
-      body = await getJson(`/api/matches?league=${limitQuery}`);
+      body = await getJson(`/api/matches?league=${encodeURIComponent("")}${limitQuery}`);
     }
     const matches = body.matches.map((match) => ({
       ...match,
@@ -2765,7 +2852,6 @@ async function scanProbabilityEventsPerMatch() {
 
   const chunks = chunkArray(matches, BATCH_EXTRACT_LIMIT);
   const concurrency = Math.max(1, Math.min(workerCount(), matches.length, 3));
-  if (els.workerCountInput) els.workerCountInput.value = String(concurrency);
   const results = [];
   let completed = 0;
   let nextIndex = 0;
@@ -3264,6 +3350,26 @@ function currentAnalysisRows() {
     return selected.length ? selected : sortedHkjcHits();
   }
   return flattenForCsv();
+}
+
+function top10PrematchRows(rows) {
+  const now = new Date();
+  return safeArray(rows).filter((row) => isPrematchTop10Candidate(row, now));
+}
+
+function top10PrematchMatches(rows) {
+  const ids = new Set(top10PrematchRows(rows).map((row) => normalizeId(row.matchId)).filter(Boolean));
+  const now = new Date();
+  return batchItems()
+    .map((item) => item.match)
+    .filter((match) => ids.has(normalizeId(match?.matchId)) && isPrematchTop10Candidate(match, now));
+}
+
+function top10ExcludedMatchCount(allRows, prematchRows) {
+  const allIds = new Set(safeArray(allRows).map((row) => normalizeId(row.matchId)).filter(Boolean));
+  const includedIds = new Set(safeArray(prematchRows).map((row) => normalizeId(row.matchId)).filter(Boolean));
+  for (const id of includedIds) allIds.delete(id);
+  return allIds.size;
 }
 
 function normalizeId(value) {
@@ -4112,6 +4218,31 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function summaryToText(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(summaryToText).filter(Boolean).join("；");
+  if (typeof value === "object") {
+    const direct =
+      value.text ||
+      value.summary ||
+      value.conclusion ||
+      value.recommendation ||
+      value.final ||
+      value.overview ||
+      value.zh ||
+      "";
+    if (direct) return summaryToText(direct);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
 function findStructuredCandidates(structured) {
   const top3 = safeArray(structured?.top3Candidates).filter((item) => item?.matchId);
   if (top3.length) return top3.slice(0, 3);
@@ -4127,7 +4258,12 @@ function findStructuredCandidates(structured) {
 }
 
 function structuredSummary(structured, fallback = "") {
-  return structured?.summary || structured?.singleMatch?.conclusion || fallback || "未有摘要";
+  return (
+    summaryToText(structured?.summary) ||
+    summaryToText(structured?.singleMatch?.conclusion) ||
+    summaryToText(fallback) ||
+    "未有摘要"
+  );
 }
 
 function analysisHasValidStructuredJson(analysis = state.analysis) {
@@ -4425,7 +4561,7 @@ async function sendAiAnalysis(payload, label = "AI 分析中") {
     failAiProgress(error.message);
     els.aiDownloadBtn.disabled = true;
     if (els.aiJsonDownloadBtn) els.aiJsonDownloadBtn.disabled = true;
-    els.analysisOutput.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+    els.analysisOutput.innerHTML = renderTechnicalErrorBox("AI 分析失敗", error);
     renderAnalysisPanels();
     setStatus("錯誤");
   } finally {
@@ -4489,7 +4625,7 @@ async function testAiConnection() {
   } catch (error) {
     state.aiTest = { ok: false, error: error.message };
     state.lastAiError = error.message;
-    els.analysisOutput.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+    els.analysisOutput.innerHTML = renderTechnicalErrorBox("AI 測試失敗", error);
     setStatus("AI 測試失敗");
   } finally {
     setWorking(false);
@@ -4603,20 +4739,34 @@ function formatFeatureLine(item, index) {
 }
 
 async function analyzeTop10WithAi() {
-  const rows = currentAnalysisRows();
-  if (!rows.length) {
+  const allRows = currentAnalysisRows();
+  const rows = top10PrematchRows(allRows);
+  const excludedMatchCount = top10ExcludedMatchCount(allRows, rows);
+  if (!allRows.length) {
     els.analysisOutput.innerHTML = `<div class="error">未有足夠資料交給 AI 排 Top 10。請先提取或掃描目標資料。</div>`;
+    return;
+  }
+  if (!rows.length) {
+    els.analysisOutput.innerHTML = `<div class="error">Top 10 預設只分析未開賽場次；目前結果只包含中場、進行中或完場賽事。</div>`;
     return;
   }
 
   const payload = buildAnalysisPayload({
     rows,
+    allRows,
+    matchesOverride: top10PrematchMatches(rows),
     workflow: "top10_ai_ranking",
   });
+  payload.top10Filter = {
+    mode: "prematch_only",
+    includedRows: rows.length,
+    excludedMatchCount,
+    note: "Top 10 ranking excludes in-play, half-time, finished, postponed, cancelled and past-kickoff matches by default.",
+  };
   payload.aiTask = {
     name: "rank_top_10_confidence",
     instruction:
-      "請由 AI 根據 raw odds 原始資料自行計算信心最高 Top 10，並在最後列出頭 3 場，詢問是否需要單獨分析。不要依賴任何本地排名，因為本地只負責收集資料。",
+      "請只使用已過濾的未開賽 matchGroups / rows 排名 Top 10；中場、進行中、完場、延期、取消或已過開賽時間的場次已由 App 排除。請由 AI 根據 raw odds 原始資料自行計算信心最高 Top 10，並在最後列出頭 3 場，詢問是否需要單獨分析。不要依賴任何本地排名，因為本地只負責收集資料。",
   };
   renderFeaturePanel();
   await sendAiAnalysis(payload, "AI 排 Top 10 中");
@@ -4871,6 +5021,8 @@ els.rememberApiFootballKeyInput.addEventListener("change", () => {
 });
 els.includeWeatherInput.addEventListener("change", updateDebugLights);
 els.includeMultiInput?.addEventListener("change", saveExtractionOptions);
+els.workerCountInput?.addEventListener("change", saveExtractionOptions);
+els.probabilityWindowInput?.addEventListener("change", saveExtractionOptions);
 
 els.matchIdInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {

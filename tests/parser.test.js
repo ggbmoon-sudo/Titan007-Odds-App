@@ -234,6 +234,22 @@ test("AI JSON parser prefers Part D single-match JSON over earlier fenced blocks
   assert.equal(parsed.recommendation.recommendation, "observe");
 });
 
+test("AI JSON parser prefers structured Top 10 JSON when report contains earlier JSON examples", () => {
+  const text = [
+    "資料限制：以下只是例子。",
+    "```json",
+    '{"example":true,"top10":[]}',
+    "```",
+    "Part D",
+    "```json",
+    '{"schemaVersion":"odds-analysis-v1","dataQuality":{"level":"medium"},"top10":[{"matchId":"m1","confidenceScore":81}],"top3Candidates":[],"highRiskMatches":[]}',
+    "```",
+  ].join("\n");
+  const parsed = require("../src/ai").parseJsonObjectFromText(text);
+  assert.equal(parsed.schemaVersion, "odds-analysis-v1");
+  assert.equal(parsed.top10[0].matchId, "m1");
+});
+
 test("AI structured output validator flags global and single-match contract gaps", () => {
   const globalValidation = aiInternals.validateStructuredAnalysis(
     {
@@ -693,6 +709,29 @@ test("parseOddsTable can include hidden multi-line rows", () => {
   assert.equal(rows[1].multiLabel, "盘2");
 });
 
+test("parseOddsPageMeta reads Titan odds page header", () => {
+  const html = `
+    <a href="http://info.titan007.com/cn/SubLeague.aspx?SclassID=292" class="LName">沙地聯</a>
+    <span class="time">2026-05-08 02:00&nbsp;星期五</span>
+    <div class="home">
+      <img alt="艾沙比(主)">
+      <a href="//zq.titan007.com/big/team/Summary/11137.html">艾沙比(主)</a>
+    </div>
+    <div class="guest">
+      <img alt="艾納斯">
+      <a href="//zq.titan007.com/big/team/Summary/2204.html">艾納斯</a>
+    </div>
+  `;
+
+  assert.deepEqual(titanInternals.parseOddsPageMeta(html, "2852349"), {
+    matchId: "2852349",
+    league: "沙地聯",
+    kickoffTime: "2026-05-08 02:00",
+    home: "艾沙比",
+    away: "艾納斯",
+  });
+});
+
 test("identifyBookmaker maps Titan007 short names to configured bookmakers", () => {
   assert.deepEqual(identifyBookmaker("澳*"), { key: "macau", label: "澳門彩票" });
   assert.deepEqual(identifyBookmaker("36*(英国)", "Bet 365"), { key: "bet365", label: "Bet365" });
@@ -724,20 +763,53 @@ test("filterBookmakerRows can identify Titan target bookmakers by market company
 
   assert.deepEqual(
     rows.map((row) => row.bookmakerKey),
-    ["pinna", "macau", "hk_jockey"]
+    ["pinna", "macau", "crown", "hk_jockey"]
   );
 });
 
-test("filterBookmakerRows maps Titan Asian Pinnacle id and keeps one main row per bookmaker", () => {
+test("filterBookmakerRows maps Titan Asian expanded pool and keeps one main row per bookmaker", () => {
   const rows = filterBookmakerRows([
     { market: "asian", companyId: "47", company: "平*", value: "main", isMultiLine: false },
     { market: "asian", companyId: "47", company: "平*", value: "multi", isMultiLine: true, multiLabel: "盘2" },
     { market: "asian", companyId: "31", company: "利*", value: "sbobet" },
   ]);
 
-  assert.equal(rows.length, 1);
+  assert.equal(rows.length, 2);
   assert.equal(rows[0].bookmakerKey, "pinna");
   assert.equal(rows[0].value, "main");
+  assert.equal(rows[1].bookmakerKey, "sbobet");
+  assert.equal(rows[1].value, "sbobet");
+});
+
+test("filterBookmakerRows keeps Crown and SBOBET as Asian/O/U extras but not Europe defaults", () => {
+  const asianRows = filterBookmakerRows([
+    { market: "asian", companyId: "3", company: "Crow*", value: "crown" },
+    { market: "asian", companyId: "31", company: "利*", value: "sbobet" },
+  ]);
+  const europeRows = filterBookmakerRows([
+    { market: "europe", companyId: "3", company: "Crow*", value: "crown" },
+    { market: "europe", companyId: "31", company: "利*", value: "sbobet" },
+  ]);
+
+  assert.deepEqual(
+    asianRows.map((row) => row.bookmakerKey),
+    ["crown", "sbobet"]
+  );
+  assert.equal(europeRows.length, 0);
+});
+
+test("Asian and O/U required coverage does not require Ladbrokes", () => {
+  assert.deepEqual(titanInternals.expectedBookmakerKeysForMarket("asian"), [
+    "pinna",
+    "macau",
+    "crown",
+    "bet365",
+    "william_hill",
+    "sbobet",
+    "interwetten",
+    "hk_jockey",
+  ]);
+  assert(titanInternals.expectedBookmakerKeysForMarket("europe").includes("ladbrokes"));
 });
 
 test("parseEuropeDataJs reads 1x2d game rows", () => {

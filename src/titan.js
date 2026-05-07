@@ -176,7 +176,7 @@ const SUPPLEMENTAL_LEAGUE_ALIASES = {
   ],
 };
 
-const BOOKMAKER_GROUPS = [
+const CORE_BOOKMAKER_GROUPS = [
   { key: "pinna", label: "Pinna", aliases: ["Pinna", "Pinna*", "Pinnacle", "平*", "平博"] },
   { key: "macau", label: "澳門彩票", aliases: ["澳門彩票", "澳门彩票", "澳", "澳*", "Macauslot"] },
   { key: "betfair", label: "Betfai", aliases: ["Betfai", "Betfai*", "Betfair"] },
@@ -190,6 +190,38 @@ const BOOKMAKER_GROUPS = [
     aliases: ["香港賽馬會", "香港赛马会", "香港馬", "香港马", "香港馬*", "香港马*", "HK Jockey Club"],
   },
 ];
+
+const MARKET_EXTRA_BOOKMAKER_GROUPS = [
+  { key: "crown", label: "Crown", aliases: ["Crown", "Crow", "Crow*", "皇冠"] },
+  { key: "sbobet", label: "利記", aliases: ["利記", "利记", "SBOBET", "利", "利*"] },
+];
+
+const BOOKMAKER_GROUPS = [
+  CORE_BOOKMAKER_GROUPS[0],
+  CORE_BOOKMAKER_GROUPS[1],
+  MARKET_EXTRA_BOOKMAKER_GROUPS[0],
+  CORE_BOOKMAKER_GROUPS[2],
+  CORE_BOOKMAKER_GROUPS[3],
+  CORE_BOOKMAKER_GROUPS[4],
+  CORE_BOOKMAKER_GROUPS[5],
+  MARKET_EXTRA_BOOKMAKER_GROUPS[1],
+  CORE_BOOKMAKER_GROUPS[6],
+  CORE_BOOKMAKER_GROUPS[7],
+];
+
+const CORE_BOOKMAKER_KEYS = CORE_BOOKMAKER_GROUPS.map((group) => group.key);
+const ASIAN_OVER_UNDER_BOOKMAKER_KEYS = [
+  "pinna",
+  "macau",
+  "crown",
+  "bet365",
+  "william_hill",
+  "ladbrokes",
+  "sbobet",
+  "interwetten",
+  "hk_jockey",
+];
+const REQUIRED_ASIAN_OVER_UNDER_BOOKMAKER_KEYS = ASIAN_OVER_UNDER_BOOKMAKER_KEYS.filter((key) => key !== "ladbrokes");
 
 const MARKET_CONFIG = {
   asian: {
@@ -329,18 +361,22 @@ const BOOKMAKER_COMPANY_ID_MAP = {
   asian: {
     47: "pinna",
     1: "macau",
+    3: "crown",
     8: "bet365",
     9: "william_hill",
     4: "ladbrokes",
+    31: "sbobet",
     19: "interwetten",
     48: "hk_jockey",
   },
   overUnder: {
     47: "pinna",
     1: "macau",
+    3: "crown",
     8: "bet365",
     9: "william_hill",
     4: "ladbrokes",
+    31: "sbobet",
     19: "interwetten",
     48: "hk_jockey",
   },
@@ -409,9 +445,19 @@ function resolveBookmakerKey(value) {
   return match?.key || normalizeComparableText(value);
 }
 
-function buildAllowedBookmakerSet(bookmakers) {
+function defaultBookmakerKeysForMarket(market) {
+  if (market === "asian" || market === "overUnder") return ASIAN_OVER_UNDER_BOOKMAKER_KEYS;
+  return CORE_BOOKMAKER_KEYS;
+}
+
+function requiredBookmakerKeysForMarket(market) {
+  if (market === "asian" || market === "overUnder") return REQUIRED_ASIAN_OVER_UNDER_BOOKMAKER_KEYS;
+  return CORE_BOOKMAKER_KEYS;
+}
+
+function buildAllowedBookmakerSet(bookmakers, market = "") {
   if (bookmakers === false) return null;
-  const source = Array.isArray(bookmakers) && bookmakers.length ? bookmakers : BOOKMAKER_GROUPS.map((group) => group.key);
+  const source = Array.isArray(bookmakers) && bookmakers.length ? bookmakers : defaultBookmakerKeysForMarket(market);
   return new Set(source.map(resolveBookmakerKey).filter(Boolean));
 }
 
@@ -439,7 +485,9 @@ function dedupeBookmakerRows(rows) {
 }
 
 function filterBookmakerRows(rows, options = {}) {
-  const allowedSet = options.filterBookmakers === false ? null : buildAllowedBookmakerSet(options.bookmakers);
+  const hasExplicitBookmakers = Array.isArray(options.bookmakers) && options.bookmakers.length;
+  const explicitAllowedSet =
+    options.filterBookmakers === false || !hasExplicitBookmakers ? null : buildAllowedBookmakerSet(options.bookmakers);
 
   const sortedRows = rows
     .map((row, sourceIndex) => {
@@ -453,14 +501,19 @@ function filterBookmakerRows(rows, options = {}) {
           }
         : { ...row, sourceIndex };
     })
-    .filter((row) => !allowedSet || allowedSet.has(row.bookmakerKey))
+    .filter((row) => {
+      if (options.filterBookmakers === false) return true;
+      const allowedSet = explicitAllowedSet || buildAllowedBookmakerSet(undefined, inferBookmakerMarket(row));
+      return allowedSet.has(row.bookmakerKey);
+    })
     .sort((a, b) => {
       const orderA = BOOKMAKER_ORDER.get(a.bookmakerKey) ?? Number.MAX_SAFE_INTEGER;
       const orderB = BOOKMAKER_ORDER.get(b.bookmakerKey) ?? Number.MAX_SAFE_INTEGER;
       return orderA - orderB || a.sourceIndex - b.sourceIndex;
     });
 
-  const outputRows = allowedSet && options.dedupeBookmakers !== false ? dedupeBookmakerRows(sortedRows) : sortedRows;
+  const shouldDedupe = options.filterBookmakers !== false && options.dedupeBookmakers !== false;
+  const outputRows = shouldDedupe ? dedupeBookmakerRows(sortedRows) : sortedRows;
 
   return outputRows.map(({ sourceIndex, ...row }) => row);
 }
@@ -814,6 +867,35 @@ function cleanMatchText(value) {
     .replace(/\s*\((?:中|neutral)\)\s*/gi, "(中)")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function extractDivBlockByClass(html, className) {
+  const regex = new RegExp(`<div\\b[^>]*class=["'][^"']*\\b${className}\\b[^"']*["'][^>]*>([\\s\\S]*?)<\\/div>`, "i");
+  const match = regex.exec(html);
+  return match ? match[1] : "";
+}
+
+function parseOddsPageMeta(html, matchId = "") {
+  const source = String(html || "");
+  if (!source) return {};
+
+  const leagueMatch = /<a\b[^>]*class=["'][^"']*\bLName\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i.exec(source);
+  const timeMatch = /<span\b[^>]*class=["'][^"']*\btime\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(source);
+  const homeBlock = extractDivBlockByClass(source, "home");
+  const guestBlock = extractDivBlockByClass(source, "guest");
+  const homeLinks = [...homeBlock.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)].map((item) => cleanMatchText(item[1])).filter(Boolean);
+  const guestLinks = [...guestBlock.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)].map((item) => cleanMatchText(item[1])).filter(Boolean);
+  const kickoffRaw = cleanMatchText(timeMatch?.[1] || "").replace(/\s*星期.*/u, "").trim();
+
+  const meta = {
+    matchId: String(matchId || "").trim(),
+    league: cleanMatchText(leagueMatch?.[1] || ""),
+    kickoffTime: kickoffRaw,
+    home: cleanMatchText(homeLinks[homeLinks.length - 1] || "").replace(/\(主\)$/u, ""),
+    away: cleanMatchText(guestLinks[guestLinks.length - 1] || "").replace(/\(客\)$/u, ""),
+  };
+
+  return Object.fromEntries(Object.entries(meta).filter(([, value]) => value));
 }
 
 function parseAttrs(attrText = "") {
@@ -1272,17 +1354,45 @@ function summarizeTargetCoverage(rows, options = {}) {
   };
 }
 
+function expectedBookmakerKeysForMarket(market, options = {}) {
+  if (Array.isArray(options.bookmakers) && options.bookmakers.length) {
+    return options.bookmakers.map(resolveBookmakerKey).filter(Boolean);
+  }
+  return requiredBookmakerKeysForMarket(market);
+}
+
+function bookmakerLabelsForKeys(keys) {
+  return keys.map((key) => BOOKMAKER_GROUP_BY_KEY.get(key)?.label || key);
+}
+
+function matchIdFromOddsUrl(url) {
+  try {
+    return new URL(url).searchParams.get("id") || "";
+  } catch {
+    return "";
+  }
+}
+
 function buildMarketCandidate(url, response, rows, market, period, options = {}) {
   const filteredRows = filterBookmakerRows(rows, options);
   const coverage = summarizeTargetCoverage(rows, options);
+  const expectedBookmakers = expectedBookmakerKeysForMarket(market, options);
+  const missingTargetBookmakers = expectedBookmakers.filter((key) => !coverage.bookmakerKeys.includes(key));
+  const coveredExpectedBookmakers = expectedBookmakers.filter((key) => coverage.bookmakerKeys.includes(key));
   const score = coverage.bookmakerCount * 1000 + filteredRows.length * 10 + rows.length - (response.incomplete ? 5000 : 0);
 
   return {
     sourceUrl: response.url || url,
     rows: filteredRows,
     rawRowCount: rows.length,
-    targetBookmakerCount: coverage.bookmakerCount,
+    targetBookmakerCount: coveredExpectedBookmakers.length,
     targetBookmakers: coverage.bookmakerKeys,
+    expectedTargetBookmakers: expectedBookmakers,
+    optionalTargetBookmakers: coverage.bookmakerKeys.filter((key) => !expectedBookmakers.includes(key)),
+    missingTargetBookmakers,
+    coverageLabel: `${coveredExpectedBookmakers.length}/${expectedBookmakers.length}`,
+    missingTargetBookmakerLabels: bookmakerLabelsForKeys(missingTargetBookmakers),
+    matchMeta: parseOddsPageMeta(response.text, matchIdFromOddsUrl(response.url || url)),
     incomplete: Boolean(response.incomplete),
     score,
     market,
@@ -1295,8 +1405,9 @@ function marketCandidateNeedsRetry(candidate) {
   if (candidate.incomplete) return true;
   if (!candidate.rawRowCount) return true;
 
-  const expectedTargetCount = candidate.market === "overUnder" ? 6 : 5;
-  return candidate.targetBookmakerCount < expectedTargetCount;
+  const expectedTargetCount = Math.min(7, candidate.expectedTargetBookmakers?.length || 7);
+  const broadEnoughRawTable = candidate.rawRowCount >= 20;
+  return candidate.targetBookmakerCount < expectedTargetCount && !broadEnoughRawTable;
 }
 
 async function fetchAndParseMarket(url, market, period, options) {
@@ -1357,7 +1468,7 @@ async function fetchAndParseMarket(url, market, period, options) {
         return output;
       }
       errors.push(
-        `${url}: weak ${market} ${period} response (${candidate.targetBookmakerCount} target bookmakers, ${candidate.rawRowCount} raw rows)`
+        `${url}: weak ${market} ${period} response (${candidate.coverageLabel} target bookmakers, ${candidate.rawRowCount} raw rows)`
       );
     } catch (error) {
       errors.push(error.message);
@@ -1482,6 +1593,18 @@ async function fetchEurope(matchId, urls, options = {}) {
   }
 }
 
+function mergeMatchMeta(...items) {
+  const merged = {};
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    for (const key of ["matchId", "league", "kickoffTime", "home", "away", "state", "score", "halfScore"]) {
+      const value = String(item[key] || "").trim();
+      if (value && !merged[key]) merged[key] = value;
+    }
+  }
+  return merged;
+}
+
 async function extractMatchOdds(matchId, options = {}) {
   const urls = oddsUrls(matchId);
   const deepMode = options.extractionMode === "deep";
@@ -1510,9 +1633,17 @@ async function extractMatchOdds(matchId, options = {}) {
       fetchEurope(matchId, urls.europe, options),
     ]);
   }
+  const match = mergeMatchMeta(
+    asianFull?.matchMeta,
+    asianHalf?.matchMeta,
+    overUnderFull?.matchMeta,
+    overUnderHalf?.matchMeta,
+    { matchId }
+  );
 
   return {
     matchId,
+    match,
     fetchedAt: new Date().toISOString(),
     extractionMode: options.extractionMode === "deep" ? "deep" : "fast",
     includeMulti: Boolean(options.includeMulti),
@@ -1641,10 +1772,11 @@ async function extractBatchOdds(matchItems, options = {}) {
       const match = items[index];
       try {
         const data = await extractMatchOdds(match.matchId, options);
+        const enrichedMatch = mergeMatchMeta(match, data.match, { matchId: match.matchId });
         results[index] = {
           ok: true,
           matchId: match.matchId,
-          match,
+          match: enrichedMatch,
           data,
           error: "",
         };
@@ -2001,9 +2133,11 @@ module.exports = {
     extractJsObjectLiteral,
     assertUsefulHtml,
     buildAllowedLeagueSet,
+    expectedBookmakerKeysForMarket,
     latestEuropeRows,
     normalizeComparableText,
     normalizeMatchItems,
+    parseOddsPageMeta,
     parseProbabilityEvents,
     parseProbabilityEventsFromJson,
     probabilityTextLines,

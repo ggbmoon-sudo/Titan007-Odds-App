@@ -121,10 +121,10 @@ const CORE_ANALYSIS_GUIDE = `
 - Top 10 必須由 AI 自行根據原始 rows 排序；本地 payload 內的 framework 只係分析指引，唔係排名結果。
 
 固定輸出格式：
-- 回應開頭必須先輸出一個 valid JSON fenced code block，格式為 \`\`\`json ... \`\`\`。
+- 先輸出人類可讀的重點摘要與分析，最後才輸出一個 valid JSON fenced code block，格式為 \`\`\`json ... \`\`\`。
 - JSON 必須可被 JSON.parse 直接解析，使用雙引號，不可加註解、尾逗號或 Markdown。
 - JSON schemaVersion 必須是 "${STRUCTURED_SCHEMA_VERSION}"。
-- JSON 後面可以再用 Markdown 補充人類可讀分析。
+- JSON 必須放在回應最後，方便 App 擷取 Part D 結果；JSON 之後不要再加額外文字。
 - 若某 workflow 不適用某欄位，請用空陣列或空字串，不要刪除頂層欄位。
 - 結構化 schema 參考：
 Titan007 payload rule:
@@ -147,10 +147,11 @@ const GLOBAL_SCAN_GUIDE = `
 - Top 10、信心分、風險、是否值得單場分析全部由 AI 根據輸入資料自行判斷。
 
 輸出規則：
-- 回應開頭必須先輸出 valid JSON fenced code block，schemaVersion="${STRUCTURED_SCHEMA_VERSION}"。
+- 先用 Markdown 給使用者可讀的 Top 10 摘要、排名方法與資料限制。
+- 最後輸出一個 valid JSON fenced code block，schemaVersion="${STRUCTURED_SCHEMA_VERSION}"。
 - JSON 必須包含 top10、top3Candidates、highRiskMatches、dataQuality。
-- JSON 後可用 Markdown 簡短補充排名方法與資料限制。
-- 用繁體中文，最後加一句「非投注建議，只是資料分析」。
+- JSON 必須放在回應最後，JSON 之後不要再加額外文字。
+- 用繁體中文，並在 JSON 前加一句「非投注建議，只是資料分析」。
 
 JSON schema 參考：
 ${JSON.stringify(STRUCTURED_OUTPUT_SCHEMA, null, 2)}
@@ -161,9 +162,10 @@ const FAST_COMBINE_GUIDE = `
 規則：
 - 不要重新分析 raw odds，不要臆測新資料，只可使用 payload.matchSummaries。
 - 必須由 AI 自己根據 summary、confidenceScore、risks、missingData 判斷 Top 10 和 Top 3。
-- 輸出要短，避免長篇 markdown；先給 3 句內中文總結，再給單一 valid JSON fenced block。
+- 輸出要短，避免長篇 markdown；先給 3 句內中文總結，最後給單一 valid JSON fenced block。
 - JSON schemaVersion 必須是 "${STRUCTURED_SCHEMA_VERSION}"。
 - JSON 必須包含 summary、dataQuality、top10、top3Candidates、highRiskMatches。
+- JSON 必須放在回應最後，JSON 之後不要再加額外文字。
 - top10 最多 10 場，每場包含 rank、matchId、matchTitle、confidenceScore、conclusion、evidence、risks、needs。
 - 如果成功分場太少或資料不足，明確降低 confidence，並在 dataQuality.missingData 標記。
 `;
@@ -299,13 +301,24 @@ function stringifyPayload(payload) {
 }
 
 function chooseJsonCandidate(candidates) {
-  return (
-    candidates.find((candidate) => candidate?.schemaVersion === STRUCTURED_SCHEMA_VERSION) ||
-    candidates.find((candidate) => candidate?.match_meta && candidate?.recommendation) ||
-    candidates.find((candidate) => candidate?.recommendation) ||
-    candidates[0] ||
-    null
-  );
+  if (!candidates.length) return null;
+
+  const scoreCandidate = (candidate, index) => {
+    let score = 0;
+    if (candidate?.schemaVersion === STRUCTURED_SCHEMA_VERSION) score += 100;
+    if (Array.isArray(candidate?.top10)) score += 45;
+    if (candidate?.dataQuality) score += 20;
+    if (Array.isArray(candidate?.top3Candidates)) score += 15;
+    if (candidate?.singleMatch) score += 45;
+    if (candidate?.match_meta && candidate?.recommendation) score += 35;
+    if (candidate?.pitch_reality || candidate?.market_truth || candidate?.corner_matrix) score += 30;
+    if (candidate?.recommendation) score += 10;
+    return { candidate, score, index };
+  };
+
+  return candidates
+    .map(scoreCandidate)
+    .sort((left, right) => right.score - left.score || right.index - left.index)[0]?.candidate || null;
 }
 
 function parseJsonObjectAt(raw, firstBrace) {
@@ -973,7 +986,7 @@ function buildAnalysisMessages(payload, options = {}) {
     },
     {
       role: "user",
-      content: `請分析以下賠率資料。若資料來自 HKJC 掃描，請優先解釋命中賠率的意義與風險；若資料來自 Titan007，請以 payload.matchGroups 為主，每一個 matchGroups item 都是一場賽事，內含同場的亞盤全場、亞盤半場、大小全場、大小半場、歐洲賠率；請把五個市場放在一起比較，再對該場作判斷。不要做 HKJC 與 Titan007 的跨來源合併分析，除非 payload 已經明確包含同一來源內的資料。\n\n再次提醒：回應第一段必須是 valid JSON fenced code block，schemaVersion="${STRUCTURED_SCHEMA_VERSION}"。\n\n資料：\n${stringifyPayload(payload)}`,
+      content: `請分析以下賠率資料。若資料來自 HKJC 掃描，請優先解釋命中賠率的意義與風險；若資料來自 Titan007，請以 payload.matchGroups 為主，每一個 matchGroups item 都是一場賽事，內含同場的亞盤全場、亞盤半場、大小全場、大小半場、歐洲賠率；請把五個市場放在一起比較，再對該場作判斷。不要做 HKJC 與 Titan007 的跨來源合併分析，除非 payload 已經明確包含同一來源內的資料。\n\n再次提醒：請先給人類可讀分析，最後才輸出 valid JSON fenced code block，schemaVersion="${STRUCTURED_SCHEMA_VERSION}"。JSON 之後不要再加文字。\n\n資料：\n${stringifyPayload(payload)}`,
     },
   ];
 }
@@ -1439,11 +1452,12 @@ async function testAiConnection(options = {}) {
         )
       : await requestJson(
           url,
-          {
-            model,
-            stream: useStreamingChat,
-            messages: testMessages,
-          },
+        {
+          model,
+          stream: useStreamingChat,
+          max_completion_tokens: 8,
+          messages: testMessages,
+        },
           apiKey,
           TEST_TIMEOUT_MS
         );

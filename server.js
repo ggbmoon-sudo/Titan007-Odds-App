@@ -333,7 +333,7 @@ const server = http.createServer(async (req, res) => {
         {
           ok: true,
           matchId,
-          match: { matchId },
+          match: data.match || { matchId },
           data,
           error: "",
         },
