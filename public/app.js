@@ -1782,7 +1782,7 @@ function updateSelectedButton() {
 function hkjcMatchBadge(match) {
   const check = match.hkjcCheck;
   if (!check) {
-    return `<span class="hkjc-match-badge checking">HKJC 檢查中</span>`;
+    return `<span class="hkjc-match-badge pending">HKJC 待查</span>`;
   }
 
   const title = check.matched
@@ -1796,6 +1796,8 @@ function hkjcMatchBadge(match) {
       ? "HKJC 已開"
       : check.status === "possible"
         ? "HKJC 疑似"
+        : check.status === "pending"
+          ? "HKJC 待查"
         : check.status === "timeout"
           ? "HKJC 逾時"
           : check.status === "error"
@@ -2043,13 +2045,14 @@ function clearHkjcCheckTimer() {
 
 function markHkjcCheckTimedOut(runId, message = "HKJC 檢查逾時，請稍後再試") {
   if (runId !== state.hkjcMatchCheckRunId) return;
-  const hasChecking = state.loadedMatches.some((match) => match.hkjcCheck?.status === "checking");
-  if (!hasChecking) return;
+  const unfinishedStatuses = new Set(["checking", "pending"]);
+  const hasUnfinished = state.loadedMatches.some((match) => unfinishedStatuses.has(match.hkjcCheck?.status));
+  if (!hasUnfinished) return;
   clearHkjcCheckTimer();
   state.hkjcMatchCheckRunId += 1;
 
   const updatedMatches = state.loadedMatches.map((match) => {
-    if (match.hkjcCheck?.status !== "checking") return match;
+    if (!unfinishedStatuses.has(match.hkjcCheck?.status)) return match;
     return {
       ...match,
       hkjcCheck: {
@@ -2089,8 +2092,8 @@ async function loadMatches(options = {}) {
       ...match,
       hkjcCheck: {
         matchId: match.matchId,
-        status: "checking",
-        label: "HKJC 檢查中",
+        status: "pending",
+        label: "HKJC 待查",
       },
     }));
     renderMatchList(matches);
