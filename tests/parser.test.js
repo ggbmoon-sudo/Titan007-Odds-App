@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const http = require("node:http");
 
 const {
   DEFAULT_ALLOWED_LEAGUES,
@@ -217,6 +218,33 @@ test("AI stream parser combines chat completion delta chunks", () => {
   ].join("\n");
 
   assert.equal(aiInternals.extractAssistantText(aiInternals.parseStreamingChatCompletion(streamed)), "OK");
+});
+
+test("AI request parser accepts SSE chunks even when stream was not requested", async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write('data: {"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":0,"total_tokens":2}}\n\n');
+    res.write('data: {"choices":[{"delta":{"content":"O"}}]}\n\n');
+    res.write('data: {"choices":[{"delta":{"content":"K"}}]}\n\n');
+    res.end("data: [DONE]\n\n");
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { port } = server.address();
+    const response = await aiInternals.requestJson(
+      new URL(`http://127.0.0.1:${port}/v1/chat/completions`),
+      { model: "gpt-5.5", stream: false, messages: [{ role: "user", content: "OK" }] },
+      "sk-test",
+      5000
+    );
+
+    assert.equal(response.streamed, true);
+    assert.equal(response.usage.total_tokens, 2);
+    assert.equal(aiInternals.extractAssistantText(response), "OK");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("AI JSON parser prefers Part D single-match JSON over earlier fenced blocks", () => {

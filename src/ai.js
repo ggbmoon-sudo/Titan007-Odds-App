@@ -1119,7 +1119,12 @@ function requestJson(url, payload, apiKey, timeoutMs = 90000, options = {}) {
         });
 
         res.on("end", () => {
-          if (payload?.stream && (res.statusCode || 0) >= 200 && (res.statusCode || 0) < 300) {
+          const statusCode = res.statusCode || 0;
+          const contentType = String(res.headers["content-type"] || "").toLowerCase();
+          const looksLikeStream =
+            contentType.includes("text/event-stream") || /^\s*data:/m.test(responseText);
+
+          if ((payload?.stream || looksLikeStream) && statusCode >= 200 && statusCode < 300) {
             try {
               finish(null, parseStreamingChatCompletion(responseText));
             } catch (error) {
@@ -1510,6 +1515,7 @@ module.exports = {
     normalizeApiMode,
     parseStreamingChatCompletion,
     redactApiKeyFromUrl,
+    requestJson,
     isRetryableAiError,
     validateStructuredAnalysis,
   },
