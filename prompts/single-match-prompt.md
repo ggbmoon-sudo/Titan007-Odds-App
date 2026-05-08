@@ -166,46 +166,20 @@ Double-Bluff 驗證：
 - xG / 陣容 / 傷停均缺失：即使市場很強，confidence 不得高於 65。
 
 【輸出格式】
-請依序輸出四個部分：
+只輸出兩個部分。不要輸出詳細分析報告、Markdown 表格、逐莊家長表、逐欄位長篇稽核或 Part B。
 
-Part A. Executive Summary
-- 2~4 句或 bullet。
-- 給出主結論、信心水準、是否建議下注。
-- 必須明講最大資料缺口。
-
-Part B. 詳細分析報告
-按四軌分段：
-1. The Pitch Reality
-2. The Market Truth
-3. The Convergence
-4. Corner Matrix
-
-每段都要包含：
-- 關鍵輸入
-- 計算/判定過程
-- 閾值或判定標準
-- 結論
-- 風險旗標
-
-必須包含表格：
-1. 比賽關鍵數據比較表
-2. 傷停與角色衝擊表
-3. 歐賠 / 亞盤 / 大小盤變化表
-4. 角球預測分佈表
-
-若資料不足，表格內填「未指定」，不可空白。
-
-Part C. 決策建議
-明確輸出：
+Part A. Result Only
+- match：主隊 vs 客隊
 - recommendation = bet / lean / observe / no-bet
 - primary_market
 - secondary_market
 - risk_level = low / medium / high / extreme
+- confidenceScore = 0-100
 - suggested_stake_pct_of_bankroll
-- 核心原因 3 條以內
+- 核心原因最多 3 條，每條 28 個中文字以內。
 
-Part D. JSON 結果
-最後只輸出一個 fenced JSON block，必須可被 JSON.parse 解析：
+Part B. JSON 結果
+最後只輸出一個 fenced JSON block，必須可被 JSON.parse 解析。JSON 之後不要再加文字：
 {
   "schemaVersion": "odds-analysis-v1",
   "workflow": "single_match_deep_analysis",

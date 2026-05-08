@@ -4266,6 +4266,184 @@ function structuredSummary(structured, fallback = "") {
   );
 }
 
+function firstTextValue(...values) {
+  for (const value of values) {
+    const text = summaryToText(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function pickTextField(source, keys = []) {
+  if (!source || typeof source !== "object") return "";
+  for (const key of keys) {
+    const text = firstTextValue(source[key]);
+    if (text) return text;
+  }
+  return "";
+}
+
+function compactListValues(...values) {
+  const items = [];
+  const add = (value) => {
+    if (value === null || value === undefined) return;
+    if (Array.isArray(value)) {
+      for (const entry of value) add(entry);
+      return;
+    }
+    if (typeof value === "object") {
+      add(value.reason || value.finding || value.text || value.summary || value.conclusion || value.value);
+      return;
+    }
+    const text = String(value).trim();
+    if (text && !items.includes(text)) items.push(text);
+  };
+  for (const value of values) add(value);
+  return items;
+}
+
+function formatConfidenceValue(value) {
+  const text = firstTextValue(value);
+  if (!text) return "未回傳";
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric >= 0 && numeric <= 100) return `${numeric}%`;
+  return text;
+}
+
+function singleMatchTitle(structured = {}, analysis = state.analysis) {
+  const single = structured.singleMatch || {};
+  const meta = structured.match_meta || {};
+  const home = pickTextField(meta, ["home_team", "homeTeam", "home", "主隊"]);
+  const away = pickTextField(meta, ["away_team", "awayTeam", "away", "客隊"]);
+  const teams = home && away ? `${home} vs ${away}` : "";
+  return firstTextValue(
+    single.matchTitle,
+    pickTextField(meta, ["match_title", "matchTitle", "match", "賽事"]),
+    teams,
+    single.matchId,
+    analysis?.focusMatchId,
+    analysis?.payloadWorkflow === "single_match_deep_analysis" ? "單場分析" : ""
+  );
+}
+
+function compactOutputLines(output = "") {
+  const priorityPattern = /(結論|建議|推薦|玩法|primary|recommend|confidence|信心|risk|風險)/i;
+  const lines = String(output || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#+\s*/, "").replace(/^[-*]\s*/, "").trim())
+    .filter((line) => line && !line.startsWith("```") && !/^[{}\[\],"]+$/.test(line));
+  const priority = lines.filter((line) => priorityPattern.test(line));
+  return (priority.length ? priority : lines).slice(0, 4);
+}
+
+function isSingleMatchAnalysis(analysis = state.analysis) {
+  return (
+    analysis?.payloadWorkflow === "single_match_deep_analysis" ||
+    analysis?.structured?.workflow === "single_match_deep_analysis"
+  );
+}
+
+function renderSingleMatchResultOutput(analysis = state.analysis) {
+  const structured = analysis?.structured || {};
+  const single = structured.singleMatch || {};
+  const rec = structured.recommendation || {};
+  const title = singleMatchTitle(structured, analysis);
+  const decision = firstTextValue(
+    pickTextField(rec, ["recommendation", "decision", "value", "建議", "結論"]),
+    single.conclusion,
+    structuredSummary(structured, "")
+  );
+  const primary = firstTextValue(
+    pickTextField(rec, ["primary_market", "primaryMarket", "main_market", "recommended_market", "主玩法", "主要玩法"]),
+    pickTextField(rec, ["market", "play", "玩法"])
+  );
+  const secondary = pickTextField(rec, [
+    "secondary_market",
+    "secondaryMarket",
+    "backup_market",
+    "次玩法",
+    "副玩法",
+  ]);
+  const risk = firstTextValue(
+    pickTextField(rec, ["risk_level", "riskLevel", "risk", "風險", "風險等級"]),
+    safeArray(single.risks)[0]
+  );
+  const stake = pickTextField(rec, [
+    "suggested_stake_pct_of_bankroll",
+    "suggestedStakePctOfBankroll",
+    "stake",
+    "suggested_stake",
+    "注碼",
+    "建議注碼",
+  ]);
+  const confidence = formatConfidenceValue(
+    firstTextValue(
+      single.confidenceScore,
+      pickTextField(rec, ["confidence", "confidence_score", "confidenceScore", "信心"])
+    )
+  );
+  const reasons = compactListValues(
+    rec.core_reasons,
+    rec["核心原因"],
+    rec.reasons,
+    rec["理由"],
+    rec.evidence,
+    single.playFit,
+    safeArray(single.layers).map((layer) => layer.finding)
+  ).slice(0, 3);
+  const fallbackLines = !decision && !primary ? compactOutputLines(analysis?.output) : [];
+  const resultClass = /no[-\s]?bet|observe|觀望|不下注|放棄/i.test(decision)
+    ? "warn"
+    : /高|strong|主推|推薦|bet|下注/i.test(decision)
+      ? "ok"
+      : "";
+
+  return `
+    <div class="single-result-output ${resultClass}">
+      <div class="single-result-head">
+        <span class="diagnostic-badge ${resultClass || "ok"}">單場結果</span>
+        <strong>${escapeHtml(title || "單場分析")}</strong>
+      </div>
+      <div class="single-result-decision">${escapeHtml(decision || fallbackLines[0] || "AI 未回傳明確結論")}</div>
+      <div class="single-result-grid">
+        <div>
+          <span>主玩法</span>
+          <strong>${escapeHtml(primary || "未回傳")}</strong>
+        </div>
+        <div>
+          <span>次玩法</span>
+          <strong>${escapeHtml(secondary || "未回傳")}</strong>
+        </div>
+        <div>
+          <span>信心</span>
+          <strong>${escapeHtml(confidence)}</strong>
+        </div>
+        <div>
+          <span>風險</span>
+          <strong>${escapeHtml(risk || "未回傳")}</strong>
+        </div>
+        <div>
+          <span>注碼</span>
+          <strong>${escapeHtml(stake || "未回傳")}</strong>
+        </div>
+      </div>
+      ${
+        reasons.length || fallbackLines.length > 1
+          ? `<ul class="single-result-reasons">${(reasons.length ? reasons : fallbackLines.slice(1))
+              .slice(0, 3)
+              .map((item) => `<li>${escapeHtml(item)}</li>`)
+              .join("")}</ul>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderAnalysisOutput(analysis = state.analysis) {
+  if (isSingleMatchAnalysis(analysis)) return renderSingleMatchResultOutput(analysis);
+  return `<pre>${escapeHtml(analysis?.output || "")}</pre>`;
+}
+
 function analysisHasValidStructuredJson(analysis = state.analysis) {
   return (
     analysis?.structured?.schemaVersion === AI_STRUCTURED_SCHEMA_VERSION &&
@@ -4438,6 +4616,7 @@ function saveAnalysisHistory(payload, analysis) {
     schemaVersion: analysis.structured?.schemaVersion || analysis.structuredSchemaVersion || "",
     model: analysis.model || "",
     rowCount: payload.rows.length,
+    focusMatchId: payload.focusMatchId || "",
     summary: structuredSummary(analysis.structured, analysis.output).slice(0, 260),
     structured: analysis.structured || null,
     validation: analysis.validation || null,
@@ -4543,11 +4722,12 @@ async function sendAiAnalysis(payload, label = "AI 分析中") {
       ...bodyData,
       rowCount: payload.rows.length,
       payloadWorkflow: payload.workflow,
+      focusMatchId: payload.focusMatchId || "",
       payloadStats: state.lastPayloadStats,
     };
     state.lastAiDurationMs = Date.now() - startedAt;
     state.lastAiError = "";
-    els.analysisOutput.innerHTML = `<pre>${escapeHtml(bodyData.output || "")}</pre>`;
+    els.analysisOutput.innerHTML = renderAnalysisOutput(state.analysis);
     els.aiDownloadBtn.disabled = false;
     if (els.aiJsonDownloadBtn) els.aiJsonDownloadBtn.disabled = !analysisHasValidStructuredJson(state.analysis);
     saveAnalysisHistory(payload, state.analysis);
@@ -5108,8 +5288,9 @@ els.historyPanel.addEventListener("click", (event) => {
     createdAt: item.createdAt,
     rowCount: item.rowCount,
     payloadWorkflow: item.workflow,
+    focusMatchId: item.focusMatchId || "",
   };
-  els.analysisOutput.innerHTML = `<pre>${escapeHtml(item.output || "")}</pre>`;
+  els.analysisOutput.innerHTML = renderAnalysisOutput(state.analysis);
   els.aiDownloadBtn.disabled = false;
   if (els.aiJsonDownloadBtn) els.aiJsonDownloadBtn.disabled = !analysisHasValidStructuredJson(state.analysis);
   renderAnalysisPanels();

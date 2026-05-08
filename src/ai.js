@@ -882,10 +882,9 @@ function buildCompactSingleMatchMessages(payload) {
 1. 先做資料稽核；缺值寫「未指定」，不可臆測。
 2. 分析四軌：球場真實戰力、市場真相、共振驗證、角球矩陣。
 3. 若市場訊號與球場訊號衝突，輸出 observe / no-bet 或僅低注碼觀察。
-4. Part A Executive Summary 2-4 句。
-5. Part B 詳細分析可精簡，但要列出關鍵輸入、計算/判定、結論、風險旗標。
-6. Part C 必須包含 recommendation、primary_market、secondary_market、risk_level、suggested_stake_pct_of_bankroll、核心原因 3 條以內。
-7. Part D 必須是一個 JSON fenced code block，並至少包含：
+4. 不要輸出 Part B 詳細報告、Markdown 表格、逐莊家長表或長篇數據描述。
+5. 人類可讀部分只輸出 Result Only：recommendation、primary_market、secondary_market、risk_level、confidenceScore、suggested_stake_pct_of_bankroll、核心原因最多 3 條。
+6. 最後必須輸出一個 JSON fenced code block，並至少包含：
 {
   "schemaVersion": "${STRUCTURED_SCHEMA_VERSION}",
   "workflow": "${payload.workflow || "single_match_deep_analysis"}",
@@ -941,9 +940,10 @@ function buildSingleMatchMessages(payload, options = {}) {
       content: `${filledPrompt}
 
 【App 相容要求】
-- 請依原 prompt 輸出 Part A、Part B、Part C、Part D。
-- Part D 必須是一個 JSON fenced code block。
-- Part D JSON 除原 prompt 欄位外，請額外包含：
+- 單場只輸出結果版；不要輸出 Part B 詳細報告、Markdown 表格、逐莊家長表或大段數據。
+- 人類可讀部分最多 8 行，必須包含 recommendation、primary_market、secondary_market、risk_level、confidenceScore、suggested_stake_pct_of_bankroll、核心原因最多 3 條。
+- 最後必須是一個 JSON fenced code block，JSON 之後不要再加文字。
+- JSON 除原 prompt 欄位外，請額外包含：
   "schemaVersion": "${STRUCTURED_SCHEMA_VERSION}",
   "workflow": "${payload.workflow || "single_match_deep_analysis"}",
   "singleMatch": {
