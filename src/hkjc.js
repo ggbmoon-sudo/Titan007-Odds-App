@@ -274,6 +274,8 @@ const COMPETITION_ALIAS_GROUPS = [
   ["欧霸杯", "歐霸盃", "欧罗巴杯", "歐羅巴盃", "欧洲联赛", "歐洲聯賽", "europa league"],
   ["欧会杯", "歐會盃", "欧洲协会联赛", "歐洲協會聯賽", "conference league"],
   ["日职联", "日職聯", "日职百年构想联赛", "日職百年構想聯賽", "j1 league"],
+  ["澳昆超", "澳洲全國聯賽昆士蘭", "澳洲全國聯賽 - 昆士蘭", "npl queensland"],
+  ["澳威超", "澳洲全國聯賽新南威爾斯", "澳洲全國聯賽 - 新南威爾斯", "npl new south wales", "npl nsw"],
 ];
 
 const TEAM_ALIAS_GROUPS = [
