@@ -179,6 +179,86 @@ test("Titan V guess index parser keeps all target-league rows with hidden values
   assert.equal(parsed.matches[0].hot, true);
 });
 
+test("Titan V guess index parser filters live and finished rows for prematch scan", () => {
+  const makeBlock = ({ position, matchId, state, kickoff, home, away }) => `
+    <div class="match" id="match_position_${position}">
+      <div class="status">
+        <div class="game_guess">德乙<i>${kickoff}</i><p></p></div>
+        <span class="time blue" id="time_${matchId}" timestate="0">${state}</span>
+      </div>
+      <div class="guessBox">
+        <div class="HTeam team" id="home_${matchId}" teamname="${home}">${home}</div>
+        <div class="guessInfo">
+          <div id="let_jd_${matchId}" data-count="60" class="guessBar ">
+            <div class="guessData"><span class="hCount">80%</span><span id="${matchId}_let" odds="0.5">半球</span><span class="gCount">20%</span></div>
+          </div>
+          <div id="ou_jd_${matchId}" data-count="40" class="guessBar ">
+            <div class="guessData"><span class="hCount">55%</span><span id="${matchId}_ou" odds="2.5">2.5</span><span class="gCount">45%</span></div>
+          </div>
+        </div>
+        <div class="GTeam team" id="guest_${matchId}" teamname="${away}">${away}</div>
+      </div>
+    </div>
+    <div class="popupGuessTD"></div>
+  `;
+  const html = [
+    makeBlock({ position: 1, matchId: "1001", state: "上", kickoff: "05-08 23:00", home: "Live A", away: "Live B" }),
+    makeBlock({ position: 2, matchId: "1002", state: "完場", kickoff: "05-08 18:30", home: "Done A", away: "Done B" }),
+    makeBlock({ position: 3, matchId: "1003", state: "未", kickoff: "05-09 00:30", home: "Next A", away: "Next B" }),
+  ].join("");
+
+  const parsed = parseTitanGuessIndexPage(html, {
+    allowedLeagues: ["德乙"],
+    prematchOnly: true,
+    hours: 24,
+    now: new Date(2026, 4, 8, 22, 40),
+  });
+
+  assert.equal(parsed.total, 1);
+  assert.equal(parsed.hitCount, 1);
+  assert.equal(parsed.matches[0].matchId, "1003");
+  assert.equal(parsed.matches[0].state, "未");
+});
+
+test("Titan V guess index parser keeps kickoff order while preserving max percentage", () => {
+  const makeBlock = ({ position, matchId, kickoff, percent }) => `
+    <div class="match" id="match_position_${position}">
+      <div class="status">
+        <div class="game_guess">德乙<i>${kickoff}</i><p></p></div>
+        <span class="time blue" id="time_${matchId}" timestate="0">未</span>
+      </div>
+      <div class="guessBox">
+        <div class="HTeam team" id="home_${matchId}" teamname="Home ${matchId}">Home ${matchId}</div>
+        <div class="guessInfo">
+          <div id="let_jd_${matchId}" data-count="60" class="guessBar ">
+            <div class="guessData"><span class="hCount">${percent}%</span><span id="${matchId}_let" odds="0.5">半球</span><span class="gCount">${100 - percent}%</span></div>
+          </div>
+        </div>
+        <div class="GTeam team" id="guest_${matchId}" teamname="Away ${matchId}">Away ${matchId}</div>
+      </div>
+    </div>
+    <div class="popupGuessTD"></div>
+  `;
+  const html = [
+    makeBlock({ position: 1, matchId: "2001", kickoff: "05-09 02:30", percent: 72 }),
+    makeBlock({ position: 2, matchId: "2002", kickoff: "05-09 04:30", percent: 91 }),
+    makeBlock({ position: 3, matchId: "2003", kickoff: "05-09 03:30", percent: 80 }),
+  ].join("");
+
+  const parsed = parseTitanGuessIndexPage(html, {
+    allowedLeagues: ["德乙"],
+    prematchOnly: true,
+    hours: 24,
+    now: new Date(2026, 4, 8, 22, 40),
+  });
+
+  assert.deepEqual(
+    parsed.matches.map((match) => match.matchId),
+    ["2001", "2003", "2002"]
+  );
+  assert.equal(parsed.matches[2].maxPercent, 91);
+});
+
 test("AI chat completions URL accepts qweapi root, base, and full endpoint", () => {
   assert.equal(
     aiInternals.chatCompletionsUrl("https://qweapi.com").toString(),
@@ -347,6 +427,7 @@ test("AI fast combine prompt uses compact summaries and retry helpers detect soc
   assert.equal(aiInternals.analysisMaxCompletionTokens({ fastCombine: true }), 3072);
   assert.equal(aiInternals.analysisMaxCompletionTokens({ workflow: "single_match_deep_analysis" }, { compactSingleMatch: true }), 4096);
   assert.equal(aiInternals.isRetryableAiError(new Error("socket hang up")), true);
+  assert.equal(aiInternals.isRetryableAiError(new Error("AI HTTP 554")), true);
   assert.equal(aiInternals.isRetryableAiError(new Error("AI HTTP 401")), false);
 });
 
@@ -625,6 +706,51 @@ test("parseLiveMatches includes added women and regional leagues", () => {
   assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("澳昆超"));
 });
 
+test("parseLiveMatches includes Uruguay split and playoff league aliases", () => {
+  const uruguayA = "\u70cf\u62c9\u7532A";
+  const uruguayB = "\u70cf\u62c9\u7532B";
+  const uruguayPlayoff = "\u4e4c\u62c9\u7532\u9644\u52a0\u8d5b";
+  const uruguayPrimera = "\u4e4c\u62c9\u572d\u7532\u7ea7\u8054\u8d5b";
+  const script = `
+    var A=Array(5);
+    A[1]="2201^#5ca39a^${uruguayA}^${uruguayA}^^Home A^Home A^^Away A^Away A^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[2]="2202^#5ca39a^${uruguayB}^${uruguayB}^^Home B^Home B^^Away B^Away B^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[3]="2203^#5ca39a^${uruguayPlayoff}^${uruguayPlayoff}^^Home C^Home C^^Away C^Away C^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[4]="2204^#5ca39a^${uruguayPrimera}^${uruguayPrimera}^^Home D^Home D^^Away D^Away D^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[5]="2205^#5ca39a^Other^Other^^Home E^Home E^^Away E^Away E^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+  `;
+
+  const defaultMatches = parseLiveMatches(script);
+  assert.deepEqual(
+    defaultMatches.map((match) => match.matchId),
+    ["2201", "2202", "2203", "2204"]
+  );
+
+  const searchedMatches = parseLiveMatches(script, { league: "\u70cf\u62c9\u7532" });
+  assert.deepEqual(
+    searchedMatches.map((match) => match.matchId),
+    ["2201", "2202", "2203", "2204"]
+  );
+});
+
+test("parseLiveMatches includes target league playoff and championship suffixes", () => {
+  const script = `
+    var A=Array(6);
+    A[1]="2301^#5ca39a^比甲附^比甲附^^Home A^Home A^^Away A^Away A^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[2]="2302^#5ca39a^荷乙附^荷乙附^^Home B^Home B^^Away B^Away B^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[3]="2303^#5ca39a^比甲冠^比甲冠^^Home C^Home C^^Away C^Away C^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[4]="2304^#5ca39a^墨西甲附^墨西甲附^^Home D^Home D^^Away D^Away D^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[5]="2305^#5ca39a^墨西聯附^墨西聯附^^Home E^Home E^^Away E^Away E^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[6]="2306^#5ca39a^Other附^Other附^^Home F^Home F^^Away F^Away F^^06:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+  `;
+
+  const matches = parseLiveMatches(script);
+  assert.deepEqual(
+    matches.map((match) => match.matchId),
+    ["2301", "2302", "2303", "2304", "2305"]
+  );
+});
+
 test("parseLiveMatches accepts Titan short cup names for default targets", () => {
   const libertadores = "\u89e3\u653e\u8005\u676f";
   const sudamericana = "\u5357\u7f8e\u76c3";
@@ -790,15 +916,17 @@ test("identifyBookmaker maps Titan007 short names to configured bookmakers", () 
 
 test("filterBookmakerRows keeps only configured bookmakers by default", () => {
   const rows = filterBookmakerRows([
-    { company: "澳*", value: 1 },
-    { company: "Crow*", value: 2 },
-    { company: "Interwet*", value: 3 },
+    { company: "Pinna*", value: 1 },
+    { company: "36*", value: 2 },
+    { company: "Crow*", value: 3 },
+    { company: "香港马*", value: 4 },
+    { company: "Interwet*", value: 5 },
   ]);
 
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 4);
   assert.deepEqual(
-    rows.map((row) => row.bookmaker),
-    ["澳門彩票", "Interwet"]
+    rows.map((row) => row.bookmakerKey),
+    ["pinna", "bet365", "crown", "hk_jockey"]
   );
 });
 
@@ -808,11 +936,12 @@ test("filterBookmakerRows can identify Titan target bookmakers by market company
     { market: "asian", companyId: "3", company: "Crow*", value: 2 },
     { market: "overUnder", companyId: "48", company: "unreadable", value: 3 },
     { market: "europe", companyId: "177", company: "unreadable", value: 4 },
+    { market: "europe", companyId: "281", company: "unreadable", value: 5 },
   ]);
 
   assert.deepEqual(
     rows.map((row) => row.bookmakerKey),
-    ["pinna", "macau", "crown", "hk_jockey"]
+    ["pinna", "bet365", "crown", "hk_jockey"]
   );
 });
 
@@ -823,14 +952,12 @@ test("filterBookmakerRows maps Titan Asian expanded pool and keeps one main row 
     { market: "asian", companyId: "31", company: "利*", value: "sbobet" },
   ]);
 
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 1);
   assert.equal(rows[0].bookmakerKey, "pinna");
   assert.equal(rows[0].value, "main");
-  assert.equal(rows[1].bookmakerKey, "sbobet");
-  assert.equal(rows[1].value, "sbobet");
 });
 
-test("filterBookmakerRows keeps Crown and SBOBET as Asian/O/U extras but not Europe defaults", () => {
+test("filterBookmakerRows keeps Crown as a target bookmaker and excludes SBOBET", () => {
   const asianRows = filterBookmakerRows([
     { market: "asian", companyId: "3", company: "Crow*", value: "crown" },
     { market: "asian", companyId: "31", company: "利*", value: "sbobet" },
@@ -842,23 +969,27 @@ test("filterBookmakerRows keeps Crown and SBOBET as Asian/O/U extras but not Eur
 
   assert.deepEqual(
     asianRows.map((row) => row.bookmakerKey),
-    ["crown", "sbobet"]
+    ["crown"]
   );
-  assert.equal(europeRows.length, 0);
+  assert.deepEqual(
+    europeRows.map((row) => row.bookmakerKey),
+    ["crown"]
+  );
 });
 
-test("Asian and O/U required coverage does not require Ladbrokes", () => {
+test("Titan extraction target coverage is limited to four AI-friendly bookmakers", () => {
   assert.deepEqual(titanInternals.expectedBookmakerKeysForMarket("asian"), [
     "pinna",
-    "macau",
-    "crown",
     "bet365",
-    "william_hill",
-    "sbobet",
-    "interwetten",
+    "crown",
     "hk_jockey",
   ]);
-  assert(titanInternals.expectedBookmakerKeysForMarket("europe").includes("ladbrokes"));
+  assert.deepEqual(titanInternals.expectedBookmakerKeysForMarket("europe"), [
+    "pinna",
+    "bet365",
+    "crown",
+    "hk_jockey",
+  ]);
 });
 
 test("parseEuropeDataJs reads 1x2d game rows", () => {
@@ -968,6 +1099,50 @@ test("Titan mobile probability parser reads freshJsonData probabilityDatas with 
   assert.equal(events[0].description, "近10场Crow*相同总进球数");
 });
 
+test("Titan panlu parser detects head-to-head over 90 percent signals", () => {
+  const script = `
+    var p=new Array();
+    p[0]=['比甲','#996600','26-04-19',11,22,3,1,1,0,0.5];
+    p[1]=['比甲','#996600','25-03-16',22,11,2,2,1,1,-0.25];
+    p[2]=['比甲','#996600','24-11-02',11,22,4,0,2,0,1];
+    p[3]=['比甲','#996600','24-02-02',33,44,0,0,0,0,0];
+  `;
+
+  const records = titanInternals.parsePanluRecords(script);
+  const result = titanInternals.headToHeadOverUnderStats(
+    { matchId: "1001", league: "比甲", homeTeamId: "11", awayTeamId: "22", home: "主", away: "客" },
+    records,
+    { threshold: 90 }
+  );
+
+  assert.equal(records.length, 4);
+  assert.equal(result.stats.sampleCount, 3);
+  assert.equal(result.stats.overPercent, 100);
+  assert.equal(result.hits.length, 1);
+  assert.equal(result.hits[0].type, "大球");
+  assert.equal(result.hits[0].market, "過往對賽大小球");
+});
+
+test("Titan panlu parser detects head-to-head under 90 percent signals", () => {
+  const script = `
+    var p=new Array();
+    p[0]=['荷乙','#003900','26-04-19',51,62,1,0,1,0,0.5];
+    p[1]=['荷乙','#003900','25-03-16',62,51,0,0,0,0,-0.25];
+    p[2]=['荷乙','#003900','24-11-02',51,62,1,1,1,0,1];
+  `;
+
+  const records = titanInternals.parsePanluRecords(script);
+  const result = titanInternals.headToHeadOverUnderStats(
+    { matchId: "1002", league: "荷乙附", homeTeamId: "51", awayTeamId: "62" },
+    records,
+    { threshold: 90 }
+  );
+
+  assert.equal(result.stats.underPercent, 100);
+  assert.equal(result.hits.length, 1);
+  assert.equal(result.hits[0].type, "小球");
+});
+
 test("HKJC odds scanner detects configured odds patterns", () => {
   const match = {
     id: "5001",
@@ -1016,6 +1191,26 @@ test("HKJC odds scanner detects configured odds patterns", () => {
   );
   assert.equal(drawHits.length, 1);
   assert.equal(drawHits[0].odds, "1.76");
+
+  const fhaSideHits = hkjcInternals.scanPool(match, {
+    oddsType: "FHA",
+    lines: [
+      {
+        lineId: "0",
+        combinations: [
+          { str: "H", currentOdds: "2.03", selections: [{ str: "H", name_ch: "半場主" }] },
+          { str: "A", currentOdds: "2.03", selections: [{ str: "A", name_ch: "半場客" }] },
+          { str: "D", currentOdds: "3.40", selections: [{ str: "D", name_ch: "半場和" }] },
+        ],
+      },
+    ],
+  });
+  assert.equal(fhaSideHits.length, 2);
+  assert.deepEqual(
+    fhaSideHits.map((hit) => hit.selection),
+    ["H", "A"]
+  );
+  assert.equal(fhaSideHits[0].rule, "FHA_HOME_AWAY_2.03");
 
   const anyHits = hkjcInternals.scanAnyOdds(
     match,
@@ -1120,6 +1315,38 @@ test("HKJC CRS scanner detects equal odds in the same total-goals bucket", () =>
   assert.equal(hits[0].ruleLabel, "全場波膽：同總入球 3 同賠率");
 });
 
+test("HKJC correct score equal-odds scanner hides odds at 15 or above", () => {
+  const match = {
+    id: "5009",
+    frontEndId: "FB9",
+    kickOffTime: "2026-05-01T20:00:00.000+08:00",
+    status: "PRESALE",
+    tournament: { name_ch: "測試聯賽", code: "TST" },
+    homeTeam: { name_ch: "主隊" },
+    awayTeam: { name_ch: "客隊" },
+  };
+
+  const hits = hkjcInternals.scanCorrectScoreEqualOdds(match, {
+    oddsType: "CRS",
+    status: "SELLINGSTARTED",
+    lines: [
+      {
+        lineId: "0",
+        combinations: [
+          { str: "0201", currentOdds: "15.00", status: "AVAILABLE", selections: [{ str: "0201", name_ch: "2:1" }] },
+          { str: "0300", currentOdds: "15", status: "AVAILABLE", selections: [{ str: "0300", name_ch: "3:0" }] },
+          { str: "0101", currentOdds: "14.50", status: "AVAILABLE", selections: [{ str: "0101", name_ch: "1:1" }] },
+          { str: "0002", currentOdds: "14.5", status: "AVAILABLE", selections: [{ str: "0002", name_ch: "0:2" }] },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].odds, "14.50");
+  assert.equal(hits[0].selectionName, "1:1 / 0:2");
+});
+
 test("HKJC FCS scanner detects 0-0 equal odds with 1-0 or 0-1", () => {
   const match = {
     id: "5004",
@@ -1153,6 +1380,54 @@ test("HKJC FCS scanner detects 0-0 equal odds with 1-0 or 0-1", () => {
   assert.equal(hits[0].ruleLabel, "半場波膽：1:0 與 0:0 同賠率");
   assert.equal(hits[1].selectionName, "0:0 / 0:1");
   assert.equal(hits[1].ruleLabel, "半場波膽：0:1 與 0:0 同賠率");
+});
+
+test("HKJC correct-score scanner detects 1-0 and 1-1 same odds within full or half pool", () => {
+  const match = {
+    id: "5010",
+    frontEndId: "FB10",
+    kickOffTime: "2026-05-01T20:00:00.000+08:00",
+    status: "PRESALE",
+    tournament: { name_ch: "測試聯賽", code: "TST" },
+    homeTeam: { name_ch: "主隊" },
+    awayTeam: { name_ch: "客隊" },
+  };
+
+  const fullHits = hkjcInternals.scanPool(match, {
+    oddsType: "CRS",
+    status: "SELLINGSTARTED",
+    lines: [
+      {
+        lineId: "0",
+        combinations: [
+          { str: "0100", currentOdds: "8.50", status: "AVAILABLE", selections: [{ str: "0100", name_ch: "1:0" }] },
+          { str: "0101", currentOdds: "8.5", status: "AVAILABLE", selections: [{ str: "0101", name_ch: "1:1" }] },
+          { str: "0200", currentOdds: "16.00", status: "AVAILABLE", selections: [{ str: "0200", name_ch: "2:0" }] },
+          { str: "0202", currentOdds: "16.00", status: "AVAILABLE", selections: [{ str: "0202", name_ch: "2:2" }] },
+        ],
+      },
+    ],
+  });
+  const halfHits = hkjcInternals.scanPool(match, {
+    oddsType: "FCS",
+    status: "SELLINGSTARTED",
+    lines: [
+      {
+        lineId: "0",
+        combinations: [
+          { str: "0100", currentOdds: "7.50", status: "AVAILABLE", selections: [{ str: "0100", name_ch: "1:0" }] },
+          { str: "0101", currentOdds: "7.5", status: "AVAILABLE", selections: [{ str: "0101", name_ch: "1:1" }] },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(fullHits.length, 1);
+  assert.equal(fullHits[0].rule, "CRS_PAIR_10_11_ODDS_8.50");
+  assert.equal(fullHits[0].selectionName, "1:0 / 1:1");
+  assert.equal(halfHits.length, 1);
+  assert.equal(halfHits[0].rule, "FCS_PAIR_10_11_ODDS_7.50");
+  assert.equal(halfHits[0].selectionName, "1:0 / 1:1");
 });
 
 test("HKJC scanner detects same odds and same score between full-time and half-time correct score", () => {

@@ -144,12 +144,23 @@ function writeGuessCache(data) {
   }
 }
 
-function cachedGuessResult(reason) {
+function cachedGuessResult(reason, options = {}) {
   const cached = readGuessCache();
   if (!cached?.data) return null;
   const ageMs = Date.now() - Date.parse(cached.savedAt || 0);
+  const threshold = Math.max(1, Math.min(Number(options.threshold || cached.data.threshold || 70), 100));
+  const matches = filterGuessMatches(cached.data.matches || [], options).map((match) => ({
+    ...match,
+    hot: Number(match.maxPercent || 0) >= threshold,
+  }));
   return {
     ...cached.data,
+    threshold,
+    total: matches.length,
+    hitCount: matches.filter((match) => match.hot).length,
+    matches,
+    prematchOnly: Boolean(options.prematchOnly),
+    hours: Number(options.hours || 0),
     fromCache: true,
     stale: ageMs > TITAN_GUESS_CACHE_TTL_MS,
     cacheReason: reason,
@@ -291,6 +302,76 @@ function parseMatchInfo(html) {
   }
 
   return infos;
+}
+
+function parseGuessKickoffDate(value, now = new Date()) {
+  const raw = cleanText(value).replace(/\//g, "-");
+  if (!raw) return null;
+
+  const full = raw.match(/(\d{4})-(\d{1,2})-(\d{1,2}).*?(\d{1,2}):(\d{2})/);
+  if (full) {
+    const [, year, month, day, hour, minute] = full.map(Number);
+    return new Date(year, month - 1, day, hour, minute);
+  }
+
+  const monthDay = raw.match(/(\d{1,2})-(\d{1,2}).*?(\d{1,2}):(\d{2})/);
+  if (monthDay) {
+    const [, month, day, hour, minute] = monthDay.map(Number);
+    return new Date(now.getFullYear(), month - 1, day, hour, minute);
+  }
+
+  const timeOnly = raw.match(/(\d{1,2}):(\d{2})/);
+  if (timeOnly) {
+    const [, hour, minute] = timeOnly.map(Number);
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute);
+    if (date.getTime() < now.getTime() - 2 * 60 * 60 * 1000) {
+      date.setDate(date.getDate() + 1);
+    }
+    return date;
+  }
+
+  return null;
+}
+
+function isGuessPrematch(match, options = {}) {
+  const state = cleanText(match.state || "").toLowerCase();
+  const now = options.now instanceof Date ? options.now : new Date();
+  const kickoff = parseGuessKickoffDate(match.kickoffTime || match.dataTime || "", now);
+  const startedState =
+    /完|上|下|中場|中场|半場|半场|加時|加时|點球|点球|進行|进行|開場|开场|延期|推遲|推迟|取消|腰斬|腰斩|斷|断|live|half|finished|postponed|cancel/i;
+
+  if (startedState.test(state)) return false;
+  if (kickoff && kickoff.getTime() < now.getTime() - 5 * 60 * 1000) return false;
+
+  const hours = Number(options.hours || 0);
+  if (hours > 0 && kickoff) {
+    const endTime = now.getTime() + hours * 60 * 60 * 1000;
+    if (kickoff.getTime() > endTime) return false;
+  }
+
+  return true;
+}
+
+function filterGuessMatches(matches, options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit || 200), 500));
+  let filtered = [...(matches || [])];
+
+  if (options.prematchOnly) {
+    filtered = filtered.filter((match) => isGuessPrematch(match, options));
+  }
+
+  const now = options.now instanceof Date ? options.now : new Date();
+  filtered = filtered
+    .map((match, index) => ({
+      match,
+      index,
+      kickoffTime:
+        parseGuessKickoffDate(match.kickoffTime || match.dataTime || "", now)?.getTime() ?? Number.POSITIVE_INFINITY,
+    }))
+    .sort((left, right) => left.kickoffTime - right.kickoffTime || left.index - right.index)
+    .map((item) => item.match);
+
+  return filtered.slice(0, limit);
 }
 
 function parseTeamBlocks(block) {
@@ -454,14 +535,15 @@ function parseIndexMarket(block, prefix, suffix, matchId) {
 
 function summarizeMatches(matches, options = {}) {
   const threshold = Math.max(1, Math.min(Number(options.threshold || 70), 100));
-  for (const match of matches) {
+  const filteredMatches = filterGuessMatches(matches, options);
+  for (const match of filteredMatches) {
     match.hot = Number(match.maxPercent || 0) >= threshold;
   }
   return {
     threshold,
-    total: matches.length,
-    hitCount: matches.filter((match) => match.hot).length,
-    matches,
+    total: filteredMatches.length,
+    hitCount: filteredMatches.filter((match) => match.hot).length,
+    matches: filteredMatches,
   };
 }
 
@@ -529,13 +611,12 @@ function parseTitanGuessIndexPage(html, options = {}) {
     if (!matchAllowedByLeague(record, options)) continue;
     seen.add(matchId);
     matches.push(record);
-    if (matches.length >= limit) break;
   }
 
   return {
     source: "titan_guess_index",
     sourceUrl: TITAN_GUESS_INDEX_URL,
-    ...summarizeMatches(matches, { threshold }),
+    ...summarizeMatches(matches, { ...options, limit, threshold }),
   };
 }
 
@@ -602,17 +683,12 @@ function parseTitanGuessHomePage(html, options = {}) {
       detailUrl,
       sourcePage: TITAN_HOME_URL,
     });
-
-    if (matches.length >= limit) break;
   }
 
   return {
     source: "titan_home_v_guess",
     sourceUrl: TITAN_HOME_URL,
-    threshold,
-    total: matches.length,
-    hitCount: matches.filter((match) => match.hot).length,
-    matches,
+    ...summarizeMatches(matches, { ...options, limit, threshold }),
   };
 }
 
@@ -634,6 +710,8 @@ async function scanTitanGuess(options = {}) {
       data = parseTitanGuessHomePage(homeResponse.text, options);
       const fallbackResult = {
         ...data,
+        prematchOnly: Boolean(options.prematchOnly),
+        hours: Number(options.hours || 0),
         fetchedAt: new Date().toISOString(),
         statusCode: homeResponse.statusCode,
         contentType: homeResponse.contentType,
@@ -645,6 +723,8 @@ async function scanTitanGuess(options = {}) {
 
     const result = {
       ...data,
+      prematchOnly: Boolean(options.prematchOnly),
+      hours: Number(options.hours || 0),
       fetchedAt: new Date().toISOString(),
       statusCode: response.statusCode,
       contentType: response.contentType,
@@ -652,7 +732,7 @@ async function scanTitanGuess(options = {}) {
     if (result.total) writeGuessCache(result);
     return result;
   } catch (error) {
-    const cached = cachedGuessResult(error.message || String(error));
+    const cached = cachedGuessResult(error.message || String(error), options);
     if (cached) return cached;
     throw error;
   }
@@ -668,6 +748,9 @@ module.exports = {
     fetchText,
     fetchTextWithRetry,
     parseGuessMarkets,
+    filterGuessMatches,
+    isGuessPrematch,
+    parseGuessKickoffDate,
     parseMatchInfo,
     parseTeamBlocks,
   },

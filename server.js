@@ -10,6 +10,7 @@ const {
   fetchLiveMatches,
   normalizeMatchItems,
   parseBoolean,
+  scanTitanHeadToHeadOverUnder,
   scanTitanProbabilityEvents,
 } = require("./src/titan");
 const { checkTitanMatchesInHkjc, scanHkjcCorrectScoreEqualOdds, scanHkjcOdds } = require("./src/hkjc");
@@ -295,6 +296,8 @@ const server = http.createServer(async (req, res) => {
         threshold: Number(requestUrl.searchParams.get("threshold") || 70),
         timeoutMs: Number(requestUrl.searchParams.get("timeoutMs") || 60000),
         attempts: Number(requestUrl.searchParams.get("attempts") || 1),
+        prematchOnly: parseBoolean(requestUrl.searchParams.get("prematchOnly")),
+        hours: Number(requestUrl.searchParams.get("hours") || 0),
       });
       sendJson(res, 200, { ok: true, data });
       return;
@@ -489,6 +492,28 @@ const server = http.createServer(async (req, res) => {
         hits,
         results,
       };
+      sendJson(res, 200, { ok: true, data });
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/head-to-head-over-under") {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { ok: false, error: "只支援 POST" });
+        return;
+      }
+
+      const body = await readJsonBody(req);
+      const matches = collectBatchMatches(body, requestUrl.searchParams);
+      if (!matches.length) {
+        sendJson(res, 400, { ok: false, error: "請提供要掃描的 Match ID" });
+        return;
+      }
+
+      const threshold = Number(body.threshold ?? requestUrl.searchParams.get("threshold") ?? 90);
+      const data = await scanTitanHeadToHeadOverUnder(matches, {
+        threshold,
+        timeoutMs: Number(body.timeoutMs || requestUrl.searchParams.get("timeoutMs") || 30000),
+      });
       sendJson(res, 200, { ok: true, data });
       return;
     }

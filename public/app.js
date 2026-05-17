@@ -43,6 +43,7 @@ const MAX_AI_ROWS = 800;
 const BATCH_EXTRACT_LIMIT = 25;
 const HKJC_OPEN_EXTRACT_WINDOW_HOURS = 6;
 const HKJC_EXTRACT_MIN_MATCH_SCORE = 50;
+const HKJC_MATCH_CHECK_TIMEOUT_MS = 120000;
 const AI_PROMPT_VERSION = "global-scan-lite-single-match-v4";
 const AI_STRUCTURED_SCHEMA_VERSION = "odds-analysis-v1";
 const CHUNKED_AI_WORKFLOWS = new Set(["top10_ai_ranking", "analyze_current_result"]);
@@ -101,6 +102,7 @@ const els = {
   extractLoadedBtn: document.getElementById("extractLoadedBtn"),
   probabilityWindowInput: document.getElementById("probabilityWindowInput"),
   probabilityScanBtn: document.getElementById("probabilityScanBtn"),
+  h2hOuScanBtn: document.getElementById("h2hOuScanBtn"),
   titanGuessScanBtn: document.getElementById("titanGuessScanBtn"),
   extractFourHourBtn: document.getElementById("extractFourHourBtn"),
   extractHkjcSixHourBtn: document.getElementById("extractHkjcSixHourBtn"),
@@ -1184,14 +1186,16 @@ function updateSummary() {
 
   if (state.probability) {
     const errors = state.probability.errorCount || 0;
-    els.resultTitle.textContent = `Titan007 概率事件 ${state.probability.hitCount || 0} 筆`;
+    const label = state.probability.label || "概率事件";
+    const thresholdLabel = `${state.probability.threshold || 80}%+`;
+    els.resultTitle.textContent = `Titan007 ${label} ${state.probability.hitCount || 0} 筆`;
     renderSummaryCards([
-      { label: "模式", value: "概率事件" },
+      { label: "模式", value: label },
       { label: "時段", value: state.probability.windowLabel || "全部" },
       { label: "掃描賽事", value: state.probability.total || 0 },
       { label: "分批", value: state.probability.batchCount ? `${state.probability.batchCount} x ≤${state.probability.chunkSize || BATCH_EXTRACT_LIMIT}` : "1" },
       { label: "Worker", value: state.probability.concurrency || 1 },
-      { label: "80%+", value: state.probability.hitCount || 0 },
+      { label: thresholdLabel, value: state.probability.hitCount || 0 },
       { label: "無資料", value: state.probability.noDataCount || 0 },
       { label: "錯誤", value: errors, className: errors ? "warning" : "" },
     ]);
@@ -1205,6 +1209,7 @@ function updateSummary() {
       { label: "模式", value: "V猜球" },
       { label: "來源", value: state.titanGuess.fromCache ? "Titan007 V猜球快取" : "Titan007 V猜球總頁" },
       { label: "掃描賽事", value: state.titanGuess.total || 0 },
+      { label: "篩選", value: state.titanGuess.prematchOnly ? "未開賽24h" : "全部" },
       { label: "70%+", value: state.titanGuess.hitCount || 0 },
       { label: "門檻", value: `${state.titanGuess.threshold || 70}%` },
       { label: state.titanGuess.fromCache ? "快取時間" : "更新", value: formatShortTime(state.titanGuess.fetchedAt) || "剛剛" },
@@ -1353,6 +1358,7 @@ function summarizeTechnicalError(error) {
   const urls = [...new Set((text.match(/https?:\/\/[^\s|)]+/g) || []).map((url) => url.replace(/[.,;]+$/, "")))];
   const urlHint = urls[0] ? ` (${urls[0]})` : "";
   const http = text.match(/\bHTTP\s+\d{3}\b/i)?.[0];
+  if (/AI HTTP 554/i.test(text)) return `AI HTTP 554：中轉/上游逾時或請求過大，已加入自動重試；如仍失敗請用新四莊家資料重新提取後再分析${urlHint}`;
   if (/timed out|timeout|逾時/i.test(text)) return `${http || "請求逾時"}${urlHint}`;
   if (/socket hang up|ECONNRESET|connection reset/i.test(text)) return `連線中斷${urlHint}`;
   if (/error page|returned an error/i.test(text)) return `Titan007 回傳錯誤頁${urlHint}`;
@@ -1811,9 +1817,11 @@ function renderProbabilityTable() {
   const errorHtml = errors.length
     ? renderErrors(errors.map((item) => ({ match: item.match || { matchId: item.matchId }, error: item.error })))
     : "";
+  const threshold = data.threshold || 80;
+  const label = data.label || "Titan007 概率事件";
 
   if (!data.hits?.length) {
-    els.tableWrap.innerHTML = `${errorHtml}<div class="empty">未找到 80% 或以上的 Titan007 概率事件</div>`;
+    els.tableWrap.innerHTML = `${errorHtml}<div class="empty">未找到 ${escapeHtml(threshold)}% 或以上的 ${escapeHtml(label)}</div>`;
     return;
   }
 
@@ -1831,7 +1839,7 @@ function renderProbabilityTable() {
           <td>${escapeHtml(hit.type || "")}</td>
           <td class="number">${escapeHtml(hit.percent)}%</td>
           <td>${escapeHtml(hit.description || "")}</td>
-          <td><a href="${escapeHtml(hit.sourcePage)}" target="_blank" rel="noreferrer">Mobile</a></td>
+          <td><a href="${escapeHtml(hit.sourcePage)}" target="_blank" rel="noreferrer">${escapeHtml(hit.sourceLabel || "Mobile")}</a></td>
         </tr>
       `
     )
@@ -1876,6 +1884,7 @@ function setMatchButtons(enabled) {
   els.clearSelectionBtn.disabled = !enabled || state.working;
   els.extractLoadedBtn.disabled = !enabled || state.working;
   els.probabilityScanBtn.disabled = state.working;
+  if (els.h2hOuScanBtn) els.h2hOuScanBtn.disabled = state.working;
   if (els.titanGuessScanBtn) els.titanGuessScanBtn.disabled = state.working;
   if (els.extractFourHourBtn) els.extractFourHourBtn.disabled = state.working;
   if (els.hkjcSpecialOddsBtn) els.hkjcSpecialOddsBtn.disabled = state.working;
@@ -1942,6 +1951,7 @@ function setWorking(isWorking) {
   if (els.workerCountInput) els.workerCountInput.disabled = isWorking;
   if (els.probabilityWindowInput) els.probabilityWindowInput.disabled = isWorking;
   els.probabilityScanBtn.disabled = isWorking;
+  if (els.h2hOuScanBtn) els.h2hOuScanBtn.disabled = isWorking;
   if (els.titanGuessScanBtn) els.titanGuessScanBtn.disabled = isWorking;
   if (els.extractFourHourBtn) els.extractFourHourBtn.disabled = isWorking;
   els.extractHkjcSixHourBtn.disabled = isWorking;
@@ -1979,6 +1989,7 @@ function renderTitanGuessTable() {
         return `
         <tr>
           <td><span class="diagnostic-badge ${badgeClass}">${badgeLabel}</span></td>
+          <td class="number">${pct(match.maxPercent || 0)}</td>
           <td>${escapeHtml(match.matchId)}</td>
           <td>${escapeHtml(match.league || "")}</td>
           <td>${escapeHtml(match.kickoffTime || match.state || "")}</td>
@@ -1998,7 +2009,6 @@ function renderTitanGuessTable() {
           <td class="number">${escapeHtml(match.underSupportOdds ?? "")}</td>
           <td class="number">${escapeHtml(match.totalCount ?? "")}</td>
           <td>${escapeHtml(guessLeanLabel(match, "total"))}</td>
-          <td class="number">${pct(match.maxPercent || 0)}</td>
           <td>${match.detailUrl ? `<a href="${escapeHtml(match.detailUrl)}" target="_blank" rel="noreferrer">V猜球</a>` : ""}</td>
         </tr>
       `;
@@ -2011,6 +2021,7 @@ function renderTitanGuessTable() {
       <thead>
         <tr>
           <th style="width:78px">標記</th>
+          <th style="width:78px">最高</th>
           <th style="width:95px">Match ID</th>
           <th style="width:100px">聯賽</th>
           <th style="width:88px">時間</th>
@@ -2030,7 +2041,6 @@ function renderTitanGuessTable() {
           <th style="width:70px">小水</th>
           <th style="width:70px">大小人數</th>
           <th style="width:92px">大小方向</th>
-          <th style="width:78px">最高</th>
           <th style="width:82px">連結</th>
         </tr>
       </thead>
@@ -2099,7 +2109,7 @@ async function checkLoadedMatchesInHkjc(matches, options = {}) {
   }));
 
   try {
-    const timeoutMs = options.timeoutMs || 30000;
+    const timeoutMs = options.timeoutMs || HKJC_MATCH_CHECK_TIMEOUT_MS;
     const body = await postJson(
       "/api/hkjc-match-check",
       {
@@ -2225,7 +2235,7 @@ async function loadMatches(options = {}) {
     setStatus("對照 HKJC 中");
     if (!options.skipHkjcAutoCheck) {
       const runId = state.hkjcMatchCheckRunId;
-      const timeoutMs = options.hkjcTimeoutMs || 35000;
+      const timeoutMs = options.hkjcTimeoutMs || HKJC_MATCH_CHECK_TIMEOUT_MS;
       state.hkjcMatchCheckTimer = window.setTimeout(() => {
         markHkjcCheckTimedOut(runId);
       }, timeoutMs);
@@ -2658,6 +2668,7 @@ async function extractHkjcOpenRange({ startHours = 0, endHours = 6, label = "HKJ
     await checkLoadedMatchesInHkjc(state.loadedMatches, {
       hours: endHours,
       possibleThreshold: HKJC_EXTRACT_MIN_MATCH_SCORE,
+      timeoutMs: HKJC_MATCH_CHECK_TIMEOUT_MS,
       rethrow: true,
     });
 
@@ -2972,6 +2983,67 @@ async function scanProbabilityEventsPerMatch() {
   }
 }
 
+async function scanHeadToHeadOverUnder() {
+  const seen = new Set();
+  const baseMatches = [];
+  for (const item of probabilityTargetMatches()) {
+    const match = typeof item === "object" ? item : matchById(item);
+    const matchId = String(match.matchId || "").trim();
+    if (!/^\d+$/.test(matchId) || seen.has(matchId)) continue;
+    seen.add(matchId);
+    baseMatches.push({ ...match, matchId });
+  }
+  const { range, matches } = filterProbabilityMatchesByWindow(baseMatches);
+
+  if (!matches.length) {
+    els.tableWrap.innerHTML = `<div class="error">沒有符合「${escapeHtml(range.label)}」的過往對賽掃描目標。請先載入/選取目標賽事，或改回全部時段。</div>`;
+    setStatus("未有目標賽事");
+    return;
+  }
+
+  setStatus(`掃對賽大小90% ${range.label} 0/${matches.length}`);
+  setWorking(true);
+  setExportButtons(false);
+  clearAnalysis();
+  els.tableWrap.innerHTML = `<div class="empty">正在讀取 Titan007 Live 往績資料，計算目標場次大小球比例...</div>`;
+
+  try {
+    const body = await postJson("/api/head-to-head-over-under", {
+      matches,
+      threshold: 90,
+      timeoutMs: 45000,
+    });
+    state.probability = {
+      ...body.data,
+      label: body.data.label || "過往對賽大小球",
+      windowValue: range.value,
+      windowLabel: range.label,
+      completedCount: matches.length,
+      partial: false,
+      concurrency: 1,
+      batchCount: 1,
+      chunkSize: matches.length,
+    };
+    state.hkjc = null;
+    state.batch = null;
+    state.data = null;
+    state.titanGuess = null;
+    updateSummary();
+    renderProbabilityTable();
+    setExportButtons(true);
+    setStatus(`對賽大小90%+ ${state.probability.hitCount || 0}筆`);
+  } catch (error) {
+    state.probability = null;
+    state.titanGuess = null;
+    updateSummary();
+    els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+    setStatus("錯誤");
+  } finally {
+    setWorking(false);
+    updateSelectedButton();
+  }
+}
+
 async function scanHkjc() {
   setStatus("掃描中");
   setWorking(true);
@@ -3015,10 +3087,10 @@ async function scanTitanGuess() {
   state.probability = null;
   state.titanGuess = null;
   updateSummary();
-  els.tableWrap.innerHTML = `<div class="empty">正在讀取 Titan007 V猜球總頁，篩選目標賽事...</div>`;
+  els.tableWrap.innerHTML = `<div class="empty">正在讀取 Titan007 V猜球總頁，只保留未開賽/未來24小時目標賽事...</div>`;
 
   try {
-    const body = await getJson("/api/titan-guess-scan?limit=120&threshold=70&timeoutMs=60000&attempts=1");
+    const body = await getJson("/api/titan-guess-scan?limit=120&threshold=70&timeoutMs=60000&attempts=1&prematchOnly=1&hours=24");
     state.titanGuess = body.data;
     updateSummary();
     renderTitanGuessTable();
@@ -3443,6 +3515,7 @@ function matchFeatureById(snapshot, matchId) {
 
 function currentAnalysisSource() {
   if (state.hkjc) return "hkjc_scan";
+  if (state.probability?.mode === "head_to_head_over_under") return "titan_h2h_over_under";
   if (state.probability) return "titan_probability_events";
   if (state.titanGuess) return "titan_v_guess";
   if (state.batch) return "titan_batch";
@@ -3462,6 +3535,32 @@ function compactObject(object, keys) {
 }
 
 function compactAnalysisRow(row) {
+  if (state.probability) {
+    return compactObject(row, [
+      "matchId",
+      "league",
+      "kickoffTime",
+      "state",
+      "score",
+      "home",
+      "away",
+      "companyName",
+      "market",
+      "oddsType",
+      "type",
+      "percent",
+      "description",
+      "count",
+      "overCount",
+      "underCount",
+      "overPercent",
+      "underPercent",
+      "kind",
+      "rawLine",
+      "sourcePage",
+    ]);
+  }
+
   if (state.titanGuess || row.asianHomePercent !== undefined || row.overPercent !== undefined) {
     return compactObject(row, [
       "matchId",
@@ -3976,6 +4075,7 @@ function summarizeChunkForCombine(chunkPayload, result) {
   const structured = result?.structured || {};
   const top = safeArray(structured.top10)[0] || {};
   const single = structured.singleMatch || {};
+  const recommendation = top.recommendation || single.recommendation || structured.recommendation || {};
   return {
     ok: true,
     matchId: chunkPayload.focusMatchId || top.matchId || single.matchId || "",
@@ -3984,6 +4084,41 @@ function summarizeChunkForCombine(chunkPayload, result) {
     marketCounts: chunkPayload.matchGroups?.[0]?.marketCounts || null,
     summary: structuredSummary(structured, result?.output).slice(0, 700),
     confidenceScore: top.confidenceScore ?? single.confidenceScore ?? null,
+    recommendedBet:
+      top.recommendedBet ||
+      top.recommended_bet ||
+      top.betRecommendation ||
+      single.recommendedBet ||
+      single.recommended_bet ||
+      recommendation.recommendedBet ||
+      recommendation.recommendation ||
+      recommendation.primary_market ||
+      "",
+    primaryMarket:
+      top.primaryMarket ||
+      top.primary_market ||
+      single.primaryMarket ||
+      single.primary_market ||
+      recommendation.primaryMarket ||
+      recommendation.primary_market ||
+      "",
+    selection:
+      top.selection ||
+      top.pick ||
+      single.selection ||
+      single.pick ||
+      recommendation.selection ||
+      recommendation.pick ||
+      "",
+    betDirection: top.betDirection || top.bet_direction || single.betDirection || single.bet_direction || "",
+    riskLevel: top.riskLevel || top.risk_level || single.riskLevel || single.risk_level || recommendation.risk_level || "",
+    suggestedStakePctOfBankroll:
+      top.suggestedStakePctOfBankroll ||
+      top.suggested_stake_pct_of_bankroll ||
+      single.suggestedStakePctOfBankroll ||
+      single.suggested_stake_pct_of_bankroll ||
+      recommendation.suggested_stake_pct_of_bankroll ||
+      "",
     conclusion: top.conclusion || single.conclusion || "",
     evidence: safeArray(top.evidence).concat(safeArray(single.layers).map((layer) => layer.finding).filter(Boolean)).slice(0, 5),
     risks: safeArray(top.risks).concat(safeArray(single.risks)).slice(0, 5),
@@ -4011,6 +4146,12 @@ function buildCombinePayload(originalPayload, chunkSummaries) {
     marketCounts: item.marketCounts || null,
     summary: String(item.summary || "").slice(0, 520),
     confidenceScore: item.confidenceScore ?? null,
+    recommendedBet: String(item.recommendedBet || "").slice(0, 180),
+    primaryMarket: String(item.primaryMarket || "").slice(0, 120),
+    selection: String(item.selection || "").slice(0, 120),
+    betDirection: String(item.betDirection || "").slice(0, 120),
+    riskLevel: String(item.riskLevel || "").slice(0, 60),
+    suggestedStakePctOfBankroll: String(item.suggestedStakePctOfBankroll || "").slice(0, 60),
     conclusion: String(item.conclusion || "").slice(0, 260),
     evidence: safeArray(item.evidence).slice(0, 4),
     risks: safeArray(item.risks).slice(0, 4),
@@ -4499,6 +4640,51 @@ function currentAnalysisMatchId() {
   );
 }
 
+function chunkSummaryForTop10(matchId) {
+  const needle = normalizeId(matchId);
+  if (!needle) return null;
+  return safeArray(state.analysis?.chunkSummaries).find((item) => normalizeId(item.matchId) === needle) || null;
+}
+
+function top10AnalysisResult(item) {
+  const chunkSummary = chunkSummaryForTop10(item.matchId);
+  const result = (
+    summaryToText(chunkSummary?.summary) ||
+    summaryToText(chunkSummary?.conclusion) ||
+    summaryToText(item.analysisResult) ||
+    summaryToText(item.summary) ||
+    ""
+  );
+  return result.length > 260 ? `${result.slice(0, 260)}...` : result;
+}
+
+function top10BetText(item) {
+  const recommendation =
+    item.recommendedBet ||
+    item.recommended_bet ||
+    item.betRecommendation ||
+    item.bet_recommendation ||
+    item.shouldBuy ||
+    item.should_buy ||
+    item.pick ||
+    item.selection ||
+    "";
+  const market = item.primaryMarket || item.primary_market || item.market || "";
+  const direction = item.betDirection || item.bet_direction || item.direction || "";
+  const risk = item.riskLevel || item.risk_level || "";
+  const stake = item.suggestedStakePctOfBankroll || item.suggested_stake_pct_of_bankroll || item.stake || "";
+  const recommendationObject = summaryToText(item.recommendation);
+  const parts = [
+    summaryToText(recommendation) || recommendationObject,
+    market ? `玩法：${summaryToText(market)}` : "",
+    direction ? `方向：${summaryToText(direction)}` : "",
+    stake ? `注碼：${summaryToText(stake)}` : "",
+    risk ? `風險：${summaryToText(risk)}` : "",
+  ].filter(Boolean);
+  const text = parts.join(" · ");
+  return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+}
+
 function renderTop10Panel(structured = state.analysis?.structured) {
   if (!els.top10Panel) return;
   const top10 = safeArray(structured?.top10).filter((item) => item?.matchId).slice(0, 10);
@@ -4512,12 +4698,16 @@ function renderTop10Panel(structured = state.analysis?.structured) {
       const evidence = safeArray(item.evidence).slice(0, 2).join("；");
       const risks = safeArray(item.risks).slice(0, 2).join("；");
       const score = Number.isFinite(Number(item.confidenceScore)) ? Number(item.confidenceScore) : "";
+      const analysisResult = top10AnalysisResult(item);
+      const betText = top10BetText(item);
       return `
         <div class="top10-row">
           <div class="top10-rank">${escapeHtml(item.rank || index + 1)}</div>
           <div class="top10-main">
             <strong>${escapeHtml(item.matchTitle || item.matchId)}</strong>
+            ${betText ? `<span class="top10-bet-note">買：${escapeHtml(betText)}</span>` : ""}
             <span>${escapeHtml(item.conclusion || "")}</span>
+            ${analysisResult ? `<span class="analysis-result-note">分場分析：${escapeHtml(analysisResult)}</span>` : ""}
             ${evidence ? `<em>證據：${escapeHtml(evidence)}</em>` : ""}
             ${risks ? `<em class="risk-note">風險：${escapeHtml(risks)}</em>` : ""}
           </div>
@@ -5012,9 +5202,14 @@ function toCsv(rows) {
       "percent",
       "description",
       "count",
+      "overCount",
+      "underCount",
+      "overPercent",
+      "underPercent",
       "kind",
       "rawLine",
       "sourcePage",
+      "sourceLabel",
     ];
     const escapeCsv = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
     return [headers.join(","), ...rows.map((row) => headers.map((key) => escapeCsv(row[key])).join(","))].join("\n");
@@ -5119,6 +5314,7 @@ function toJsonl(rows) {
 els.loadMatchesBtn.addEventListener("click", loadMatches);
 els.quickExtractBtn.addEventListener("click", quickExtract);
 els.probabilityScanBtn.addEventListener("click", scanProbabilityEventsPerMatch);
+els.h2hOuScanBtn?.addEventListener("click", scanHeadToHeadOverUnder);
 els.titanGuessScanBtn?.addEventListener("click", scanTitanGuess);
 els.extractFourHourBtn?.addEventListener("click", extractFourHourUpcoming);
 els.extractHkjcSixHourBtn.addEventListener("click", extractHkjcSixHourOpen);

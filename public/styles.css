@@ -1274,6 +1274,15 @@ td.muted,
   color: var(--warn);
 }
 
+.top10-main .analysis-result-note {
+  color: var(--accent-strong);
+}
+
+.top10-main .top10-bet-note {
+  color: var(--success);
+  font-weight: 800;
+}
+
 .single-summary {
   padding: 8px;
   border: 1px solid var(--line);

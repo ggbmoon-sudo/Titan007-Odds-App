@@ -84,6 +84,7 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "阿聯酋聯",
   "卡塔爾王子盃",
   "歐冠盃",
+  "烏拉甲",
 ];
 
 const LEAGUE_ALIASES = {
@@ -163,6 +164,35 @@ const LEAGUE_ALIASES = {
     "NPL NSW",
   ],
   "澳維超": ["澳维超", "澳洲維多利亞超級聯賽", "澳洲維多利亞超"],
+  "烏拉甲": [
+    "乌拉甲",
+    "烏拉甲A",
+    "烏拉甲B",
+    "乌拉甲A",
+    "乌拉甲B",
+    "烏拉甲附加賽",
+    "烏拉甲附加赛",
+    "乌拉甲附加賽",
+    "乌拉甲附加赛",
+    "烏拉圭甲組聯賽",
+    "烏拉圭甲组联赛",
+    "乌拉圭甲組聯賽",
+    "乌拉圭甲组联赛",
+    "烏拉圭甲級聯賽",
+    "烏拉圭甲级联赛",
+    "乌拉圭甲級聯賽",
+    "乌拉圭甲级联赛",
+    "烏拉圭甲組A",
+    "烏拉圭甲組B",
+    "乌拉圭甲组A",
+    "乌拉圭甲组B",
+    "烏拉圭附加賽",
+    "烏拉圭附加赛",
+    "乌拉圭附加賽",
+    "乌拉圭附加赛",
+    "Uruguay Primera Division",
+    "Uruguayan Primera Division",
+  ],
 };
 
 const SUPPLEMENTAL_LEAGUE_ALIASES = {
@@ -197,6 +227,30 @@ const SUPPLEMENTAL_LEAGUE_ALIASES = {
   ],
 };
 
+const LEAGUE_PHASE_SUFFIXES = [
+  "附",
+  "附加賽",
+  "附加赛",
+  "冠",
+  "冠軍組",
+  "冠军组",
+  "爭冠",
+  "争冠",
+  "季後賽",
+  "季后赛",
+  "保級",
+  "保级",
+];
+
+const DEFAULT_ALLOWED_PHASE_LEAGUES = [
+  "荷乙附",
+  "荷乙附加賽",
+  "荷乙附加赛",
+  "墨西甲附",
+  "墨西甲附加賽",
+  "墨西甲附加赛",
+];
+
 const CORE_BOOKMAKER_GROUPS = [
   { key: "pinna", label: "Pinna", aliases: ["Pinna", "Pinna*", "Pinnacle", "平*", "平博"] },
   { key: "macau", label: "澳門彩票", aliases: ["澳門彩票", "澳门彩票", "澳", "澳*", "Macauslot"] },
@@ -230,19 +284,15 @@ const BOOKMAKER_GROUPS = [
   CORE_BOOKMAKER_GROUPS[7],
 ];
 
-const CORE_BOOKMAKER_KEYS = CORE_BOOKMAKER_GROUPS.map((group) => group.key);
-const ASIAN_OVER_UNDER_BOOKMAKER_KEYS = [
+const TARGET_BOOKMAKER_KEYS = [
   "pinna",
-  "macau",
-  "crown",
   "bet365",
-  "william_hill",
-  "ladbrokes",
-  "sbobet",
-  "interwetten",
+  "crown",
   "hk_jockey",
 ];
-const REQUIRED_ASIAN_OVER_UNDER_BOOKMAKER_KEYS = ASIAN_OVER_UNDER_BOOKMAKER_KEYS.filter((key) => key !== "ladbrokes");
+const CORE_BOOKMAKER_KEYS = TARGET_BOOKMAKER_KEYS;
+const ASIAN_OVER_UNDER_BOOKMAKER_KEYS = TARGET_BOOKMAKER_KEYS;
+const REQUIRED_ASIAN_OVER_UNDER_BOOKMAKER_KEYS = TARGET_BOOKMAKER_KEYS;
 
 const MARKET_CONFIG = {
   asian: {
@@ -278,8 +328,11 @@ function toTraditionalText(value) {
     .replace(/门/g, "門")
     .replace(/尔/g, "爾")
     .replace(/苏/g, "蘇")
+    .replace(/乌/g, "烏")
     .replace(/联/g, "聯")
     .replace(/维/g, "維")
+    .replace(/级/g, "級")
+    .replace(/组/g, "組")
     .replace(/欧/g, "歐")
     .replace(/亚/g, "亞")
     .replace(/职/g, "職")
@@ -308,6 +361,17 @@ function normalizeComparableText(value) {
     .replace(/[^0-9a-z\u4e00-\u9fff]+/gi, "");
 }
 
+function addLeagueNameToSet(set, league, { withPhaseSuffixes = false } = {}) {
+  const normalized = normalizeComparableText(league);
+  if (normalized) set.add(normalized);
+  if (!withPhaseSuffixes) return;
+
+  for (const suffix of LEAGUE_PHASE_SUFFIXES) {
+    const normalizedVariant = normalizeComparableText(`${league}${suffix}`);
+    if (normalizedVariant) set.add(normalizedVariant);
+  }
+}
+
 function buildAllowedLeagueSet(allowedLeagues = DEFAULT_ALLOWED_LEAGUES) {
   if (allowedLeagues === false) return null;
 
@@ -315,16 +379,20 @@ function buildAllowedLeagueSet(allowedLeagues = DEFAULT_ALLOWED_LEAGUES) {
   const leagues = Array.isArray(allowedLeagues) ? allowedLeagues : DEFAULT_ALLOWED_LEAGUES;
 
   for (const league of leagues) {
-    const normalized = normalizeComparableText(league);
-    if (normalized) set.add(normalized);
+    addLeagueNameToSet(set, league, { withPhaseSuffixes: true });
 
     const aliases = [
       ...(LEAGUE_ALIASES[league] || []),
       ...(SUPPLEMENTAL_LEAGUE_ALIASES[league] || []),
     ];
     for (const alias of aliases) {
-      const normalizedAlias = normalizeComparableText(alias);
-      if (normalizedAlias) set.add(normalizedAlias);
+      addLeagueNameToSet(set, alias, { withPhaseSuffixes: true });
+    }
+  }
+
+  if (leagues === DEFAULT_ALLOWED_LEAGUES) {
+    for (const league of DEFAULT_ALLOWED_PHASE_LEAGUES) {
+      addLeagueNameToSet(set, league);
     }
   }
 
@@ -375,7 +443,11 @@ const NORMALIZED_BOOKMAKER_GROUPS = BOOKMAKER_GROUPS.map((group) => ({
   normalizedAliases: group.aliases.map(normalizeComparableText).filter(Boolean),
 }));
 const BOOKMAKER_KEY_SET = new Set(BOOKMAKER_GROUPS.map((group) => group.key));
-const BOOKMAKER_ORDER = new Map(BOOKMAKER_GROUPS.map((group, index) => [group.key, index]));
+const BOOKMAKER_ORDER_KEYS = [
+  ...TARGET_BOOKMAKER_KEYS,
+  ...BOOKMAKER_GROUPS.map((group) => group.key).filter((key) => !TARGET_BOOKMAKER_KEYS.includes(key)),
+];
+const BOOKMAKER_ORDER = new Map(BOOKMAKER_ORDER_KEYS.map((key, index) => [key, index]));
 const BOOKMAKER_GROUP_BY_KEY = new Map(BOOKMAKER_GROUPS.map((group) => [group.key, group]));
 
 const BOOKMAKER_COMPANY_ID_MAP = {
@@ -404,6 +476,7 @@ const BOOKMAKER_COMPANY_ID_MAP = {
   europe: {
     177: "pinna",
     80: "macau",
+    3: "crown",
     2: "betfair",
     988: "betfair",
     1036: "betfair",
@@ -1272,6 +1345,8 @@ function parseLiveMatches(scriptText, options = {}) {
       score: scoreText(fields[14], fields[15]),
       halfScore: scoreText(fields[18], fields[19]),
       asianInitialLine: fields[29] || "",
+      homeTeamId: fields[37] || "",
+      awayTeamId: fields[38] || "",
       totalInitialLine: fields[46] || "",
     };
 
@@ -1828,6 +1903,10 @@ function titanProbabilityUrl(matchId) {
   return `https://m.titan007.com/analy/Analysis/${encodeURIComponent(matchId)}.htm`;
 }
 
+function titanPanluUrl() {
+  return `https://live.titan007.com/vbsxml/panlu_ut.js?r=007&_${Date.now()}`;
+}
+
 function probabilitySectionHtml(html) {
   const marker = /概率事件|概率|Probability\s*Events?/i.exec(html);
   if (!marker) return "";
@@ -1898,6 +1977,239 @@ function parseFreshJsonData(html) {
   } catch {
     return null;
   }
+}
+
+function parseJsArrayItems(source) {
+  const items = [];
+  let current = "";
+  let quote = "";
+  let escaped = false;
+  let quoted = false;
+
+  const push = () => {
+    items.push(quoted ? current : current.trim());
+    current = "";
+    quote = "";
+    escaped = false;
+    quoted = false;
+  };
+
+  for (const char of String(source || "")) {
+    if (quote) {
+      if (escaped) {
+        current += char;
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = "";
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "\"" || char === "'") {
+      quote = char;
+      quoted = true;
+      continue;
+    }
+    if (char === ",") {
+      push();
+      continue;
+    }
+    current += char;
+  }
+  push();
+  return items;
+}
+
+function parsePanluRecords(scriptText) {
+  const records = [];
+  const regex = /p\[(\d+)]\s*=\s*\[([\s\S]*?)];/g;
+  let match;
+  while ((match = regex.exec(String(scriptText || "")))) {
+    const fields = parseJsArrayItems(match[2]);
+    if (fields.length < 10) continue;
+    const homeGoals = Number(fields[5]);
+    const awayGoals = Number(fields[6]);
+    if (!Number.isFinite(homeGoals) || !Number.isFinite(awayGoals)) continue;
+    records.push({
+      index: Number(match[1]),
+      league: cleanMatchText(fields[0] || ""),
+      color: fields[1] || "",
+      playedAt: fields[2] || "",
+      homeTeamId: String(fields[3] || "").trim(),
+      awayTeamId: String(fields[4] || "").trim(),
+      homeGoals,
+      awayGoals,
+      halfHomeGoals: Number(fields[7]),
+      halfAwayGoals: Number(fields[8]),
+      handicap: Number(fields[9]),
+      totalGoals: homeGoals + awayGoals,
+      raw: fields,
+    });
+  }
+  return records;
+}
+
+function roundPercent(count, total) {
+  if (!total) return 0;
+  return Math.round((count / total) * 1000) / 10;
+}
+
+function headToHeadOverUnderStats(match, records, options = {}) {
+  const threshold = Number(options.threshold ?? 90);
+  const sourcePage = DEFAULT_REFERER;
+  const homeTeamId = String(match?.homeTeamId || match?.homeId || "").trim();
+  const awayTeamId = String(match?.awayTeamId || match?.awayId || "").trim();
+
+  if (!homeTeamId || !awayTeamId) {
+    return {
+      ok: true,
+      noData: true,
+      matchId: match?.matchId || "",
+      match,
+      sourcePage,
+      hits: [],
+      error: "",
+      note: "缺少 Titan 球隊 ID，未能對應過往對賽。",
+    };
+  }
+
+  const history = (records || []).filter(
+    (record) =>
+      (record.homeTeamId === homeTeamId && record.awayTeamId === awayTeamId) ||
+      (record.homeTeamId === awayTeamId && record.awayTeamId === homeTeamId)
+  );
+  const sampleCount = history.length;
+  if (!sampleCount) {
+    return {
+      ok: true,
+      noData: true,
+      matchId: match?.matchId || "",
+      match,
+      sourcePage,
+      hits: [],
+      error: "",
+      note: "Titan007 往績檔未找到此對賽。",
+    };
+  }
+
+  const overCount = history.filter((record) => record.totalGoals > 2.5).length;
+  const underCount = sampleCount - overCount;
+  const overPercent = roundPercent(overCount, sampleCount);
+  const underPercent = roundPercent(underCount, sampleCount);
+  const historySummary = history
+    .slice(0, 10)
+    .map((record) => `${record.playedAt} ${record.homeGoals}-${record.awayGoals}`)
+    .join(" | ");
+  const base = {
+    matchId: match?.matchId || "",
+    league: match?.league || "",
+    kickoffTime: match?.kickoffTime || "",
+    state: match?.state || "",
+    score: match?.score || "",
+    home: match?.home || "",
+    away: match?.away || "",
+    companyName: "Titan007",
+    companyId: "",
+    market: "過往對賽大小球",
+    oddsType: "H2H_OU",
+    count: sampleCount,
+    kind: "head_to_head",
+    overCount,
+    underCount,
+    overPercent,
+    underPercent,
+    rawLine: historySummary,
+    sourcePage,
+    sourceLabel: "Live 往績",
+  };
+
+  const hits = [];
+  if (overPercent >= threshold) {
+    hits.push({
+      ...base,
+      type: "大球",
+      percent: overPercent,
+      description: `近${sampleCount}次對賽，大球${overCount}次（${overPercent}%）`,
+    });
+  }
+  if (underPercent >= threshold) {
+    hits.push({
+      ...base,
+      type: "小球",
+      percent: underPercent,
+      description: `近${sampleCount}次對賽，小球${underCount}次（${underPercent}%）`,
+    });
+  }
+
+  return {
+    ok: true,
+    noData: false,
+    matchId: match?.matchId || "",
+    match,
+    sourcePage,
+    stats: {
+      sampleCount,
+      overCount,
+      underCount,
+      overPercent,
+      underPercent,
+    },
+    hits,
+    error: "",
+  };
+}
+
+async function fetchPanluRecords(options = {}) {
+  const page = await fetchFirstAvailable([titanPanluUrl()], {
+    referer: DEFAULT_REFERER,
+    userAgent: USER_AGENT,
+    timeoutMs: options.timeoutMs || 30000,
+    curlTimeoutMs: options.curlTimeoutMs || 25000,
+    attempts: options.attempts || 1,
+    preferCurl: true,
+    maxBuffer: options.maxBuffer || 24 * 1024 * 1024,
+  });
+  return parsePanluRecords(page.text);
+}
+
+function mergeLiveMatchIds(items, liveMatches) {
+  const liveById = new Map((liveMatches || []).map((match) => [String(match.matchId || ""), match]));
+  return items.map((item) => {
+    const live = liveById.get(String(item.matchId || ""));
+    return live ? { ...live, ...item, homeTeamId: item.homeTeamId || live.homeTeamId, awayTeamId: item.awayTeamId || live.awayTeamId } : item;
+  });
+}
+
+async function scanTitanHeadToHeadOverUnder(matchItems, options = {}) {
+  const items = normalizeMatchItems(matchItems);
+  const threshold = Number(options.threshold ?? 90);
+  const needsLiveMeta = items.some((match) => !match.homeTeamId || !match.awayTeamId);
+  const [records, liveMatches] = await Promise.all([
+    fetchPanluRecords(options),
+    needsLiveMeta ? fetchLiveMatches({ allowedLeagues: false }) : Promise.resolve([]),
+  ]);
+  const enrichedItems = needsLiveMeta ? mergeLiveMatchIds(items, liveMatches) : items;
+  const results = enrichedItems.map((match) => headToHeadOverUnderStats(match, records, { threshold }));
+  const hits = results.flatMap((result) => result?.hits || []);
+
+  return {
+    fetchedAt: new Date().toISOString(),
+    mode: "head_to_head_over_under",
+    label: "過往對賽大小球",
+    threshold,
+    total: items.length,
+    okCount: results.filter((result) => result?.ok).length,
+    errorCount: results.filter((result) => result && !result.ok).length,
+    noDataCount: results.filter((result) => result?.noData).length,
+    hitCount: hits.length,
+    matchHitCount: new Set(hits.map((hit) => hit.matchId)).size,
+    hits,
+    results,
+  };
 }
 
 function probabilityScaleEvents(stat, typeConfig) {
@@ -2142,6 +2454,7 @@ module.exports = {
   parseOddsTable,
   parseEuropeDataJs,
   parseEuropeOdds,
+  scanTitanHeadToHeadOverUnder,
   scanTitanProbabilityEvents,
   _internals: {
     bufferDeclaresUtf8,
@@ -2156,9 +2469,12 @@ module.exports = {
     buildAllowedLeagueSet,
     expectedBookmakerKeysForMarket,
     latestEuropeRows,
+    headToHeadOverUnderStats,
     normalizeComparableText,
     normalizeMatchItems,
+    parseJsArrayItems,
     parseOddsPageMeta,
+    parsePanluRecords,
     parseProbabilityEvents,
     parseProbabilityEventsFromJson,
     probabilityTextLines,

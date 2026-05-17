@@ -40,10 +40,13 @@ const HKJC_SPECIAL_RULES = [
   { pool: "HAD", label: "主客和：2.14 / 3.00 / 3.00" },
   { pool: "HAD", label: "主客和：3.00 / 3.00 / 2.14" },
   { pool: "FHA", label: "半場主客和：和 1.76" },
+  { pool: "FHA", label: "半場主客和：主/客 2.03" },
   { pool: "HHA", label: "讓球主客和：和 3.10" },
   { pool: "HIL", label: "入球大細：1.66 或 1.69" },
   { pool: "FHL", label: "半場入球大細：1.66 / 1.69 / 1.94" },
 ];
+
+const MAX_CORRECT_SCORE_EQUAL_ODDS = 15;
 
 const HKJC_MATCH_QUERY = `
       query matchList($startIndex: Int, $endIndex: Int,$startDate: String, $endDate: String, $matchIds: [String], $tournIds: [String], $fbOddsTypes: [FBOddsType]!, $fbOddsTypesM: [FBOddsType]!, $inplayOnly: Boolean, $featuredMatchesOnly: Boolean, $frontEndIds: [String], $earlySettlementOnly: Boolean, $showAllMatch: Boolean) {
@@ -724,6 +727,7 @@ function readableRuleLabel(rule, fallback) {
   if (value === "HAD_2.14_3.00_3.00") return "主客和 2.14 / 3.00 / 3.00";
   if (value === "HAD_3.00_3.00_2.14") return "主客和 3.00 / 3.00 / 2.14";
   if (/^FHA_DRAW_1\.76$/.test(value)) return "半場主客和 和 1.76";
+  if (/^FHA_HOME_AWAY_2\.03$/.test(value)) return "半場主客和 主/客 2.03";
   if (/^(HHA|EHH)_DRAW_3\.10$/.test(value)) return "讓球主客和 和 3.10";
   if (/^(HIL|EHL)_ANY_(1\.66|1\.69)$/.test(value)) return `入球大細 ${value.slice(-4)}`;
   if (/^FHL_ANY_(1\.66|1\.69|1\.94)$/.test(value)) return `半場入球大細 ${value.slice(-4)}`;
@@ -825,6 +829,19 @@ function scanDrawOdds(match, pool, target, ruleLabel) {
   return hits;
 }
 
+function scanHomeAwayOdds(match, pool, target, ruleLabel) {
+  const hits = [];
+  for (const line of pool.lines || []) {
+    for (const combination of line.combinations || []) {
+      const side = selectionStr(combination);
+      if ((side === "H" || side === "A") && sameOdds(combination.currentOdds, target)) {
+        hits.push(hitRecord(match, pool, line, combination, `${pool.oddsType}_HOME_AWAY_${target}`, ruleLabel));
+      }
+    }
+  }
+  return hits;
+}
+
 function scanAnyOdds(match, pool, targets, labelPrefix) {
   const hits = [];
   for (const line of pool.lines || []) {
@@ -838,6 +855,11 @@ function scanAnyOdds(match, pool, targets, labelPrefix) {
     }
   }
   return hits;
+}
+
+function isDisplayableCorrectScoreOdds(odds) {
+  const number = Number(odds);
+  return Number.isFinite(number) && number < MAX_CORRECT_SCORE_EQUAL_ODDS;
 }
 
 function isInplayMatch(match) {
@@ -936,7 +958,7 @@ function correctScoreOddsGroups(pool) {
     for (const combination of line.combinations || []) {
       const score = parseCorrectScore(combination);
       const odds = normalizeOdds(combination.currentOdds);
-      if (!score || !odds) continue;
+      if (!score || !odds || !isDisplayableCorrectScoreOdds(odds)) continue;
 
       const totalGoals = score.home + score.away;
       const key = `${score.label}|${odds}`;
@@ -1049,6 +1071,64 @@ function halfCorrectScorePairRecord(match, pool, line, baseItem, pairedItem, sid
   };
 }
 
+function sameOddsScorePairRecord(match, pool, line, firstItem, pairedItem, labelPrefix) {
+  const scores = [firstItem.scoreLabel, pairedItem.scoreLabel];
+  const odds = firstItem.odds;
+  const poolType = pool.oddsType || "";
+  return {
+    ...baseMatch(match),
+    sourcePage: `https://bet.hkjc.com/ch/football/${sourcePageFromOddsType(poolType)}`,
+    pool: poolType,
+    poolName: pool.name_ch || pool.name_en || "",
+    rule: `${poolType}_PAIR_${firstItem.scoreLabel.replace(":", "")}_${pairedItem.scoreLabel.replace(":", "")}_ODDS_${odds}`,
+    ruleLabel: `${labelPrefix}：${scores.join(" / ")}`,
+    lineId: line.lineId || "",
+    line: labelPrefix,
+    lineStatus: line.status || "",
+    selection: scores.join(" / "),
+    selectionName: scores.join(" / "),
+    odds,
+    poolStatus: pool.status || "",
+    combinationStatus: [firstItem.status, pairedItem.status].filter(Boolean).join(" / "),
+    updateAt: pool.updateAt || "",
+    totalGoals: "",
+    scoreCount: scores.length,
+    scoreOddsGroup: [firstItem, pairedItem].map((item) => ({
+      score: item.scoreLabel,
+      odds: item.odds,
+      status: item.status,
+    })),
+  };
+}
+
+function scanSpecificCorrectScorePairs(match, pool, pairs, labelPrefix) {
+  const hits = [];
+  for (const line of pool.lines || []) {
+    const scores = new Map();
+    for (const combination of line.combinations || []) {
+      const score = parseCorrectScore(combination);
+      const odds = normalizeOdds(combination.currentOdds);
+      if (!score || !odds || !isDisplayableCorrectScoreOdds(odds)) continue;
+
+      scores.set(score.label, {
+        scoreLabel: score.label,
+        odds,
+        status: combination.status || "",
+        totalGoals: score.home + score.away,
+      });
+    }
+
+    for (const [firstScore, pairedScore] of pairs) {
+      const firstItem = scores.get(firstScore);
+      const pairedItem = scores.get(pairedScore);
+      if (firstItem && pairedItem && firstItem.odds === pairedItem.odds) {
+        hits.push(sameOddsScorePairRecord(match, pool, line, firstItem, pairedItem, labelPrefix));
+      }
+    }
+  }
+  return hits;
+}
+
 function scanCorrectScoreEqualOdds(match, pool) {
   const hits = [];
 
@@ -1057,7 +1137,7 @@ function scanCorrectScoreEqualOdds(match, pool) {
     for (const combination of line.combinations || []) {
       const score = parseCorrectScore(combination);
       const odds = normalizeOdds(combination.currentOdds);
-      if (!score || !odds) continue;
+      if (!score || !odds || !isDisplayableCorrectScoreOdds(odds)) continue;
 
       const totalGoals = score.home + score.away;
       const key = `${totalGoals}|${odds}`;
@@ -1089,7 +1169,7 @@ function scanHalfCorrectScoreTargetPairs(match, pool) {
     for (const combination of line.combinations || []) {
       const score = parseCorrectScore(combination);
       const odds = normalizeOdds(combination.currentOdds);
-      if (!score || !odds) continue;
+      if (!score || !odds || !isDisplayableCorrectScoreOdds(odds)) continue;
 
       scores.set(score.label, {
         scoreLabel: score.label,
@@ -1121,7 +1201,10 @@ function scanPool(match, pool) {
     case "HAD":
       return scanHad(match, pool);
     case "FHA":
-      return scanDrawOdds(match, pool, "1.76", "半場主客和 和 1.76");
+      return [
+        ...scanDrawOdds(match, pool, "1.76", "半場主客和 和 1.76"),
+        ...scanHomeAwayOdds(match, pool, "2.03", "半場主客和 主/客 2.03"),
+      ];
     case "EHH":
     case "HHA":
       return scanDrawOdds(match, pool, "3.10", "讓球主客和 和 3.10");
@@ -1131,9 +1214,15 @@ function scanPool(match, pool) {
     case "FHL":
       return scanAnyOdds(match, pool, ["1.66", "1.69", "1.94"], "半場入球大細");
     case "FCS":
-      return scanHalfCorrectScoreTargetPairs(match, pool);
+      return [
+        ...scanHalfCorrectScoreTargetPairs(match, pool),
+        ...scanSpecificCorrectScorePairs(match, pool, [["1:0", "1:1"]], "半場波膽同賠率"),
+      ];
     case "CRS":
-      return scanCorrectScoreEqualOdds(match, pool);
+      return [
+        ...scanCorrectScoreEqualOdds(match, pool),
+        ...scanSpecificCorrectScorePairs(match, pool, [["1:0", "1:1"]], "全場波膽同賠率"),
+      ];
     default:
       return [];
   }

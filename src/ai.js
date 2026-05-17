@@ -16,7 +16,7 @@ const MAX_RESPONSE_CHARS = 4 * 1024 * 1024;
 const ANALYSIS_TIMEOUT_MS = 600000;
 const TEST_TIMEOUT_MS = 300000;
 const AI_RETRY_DELAY_MS = 2500;
-const ANALYSIS_RETRY_COUNT = 1;
+const ANALYSIS_RETRY_COUNT = 2;
 const USE_STREAMING_CHAT = false;
 const GUIDE_STATUS_HEADINGS_LIMIT = 18;
 const STRUCTURED_SCHEMA_VERSION = "odds-analysis-v1";
@@ -49,6 +49,12 @@ const STRUCTURED_OUTPUT_SCHEMA = {
       matchId: "string",
       matchTitle: "string",
       confidenceScore: 0,
+      recommendedBet: "string; answer what to buy, or 'observe / no-bet'",
+      primaryMarket: "string; e.g. Asian Handicap, Over/Under, 1X2, HKJC HAD/HHA/HiLo",
+      selection: "string; exact side/line/pick",
+      betDirection: "string",
+      riskLevel: "low/medium/high/extreme",
+      suggestedStakePctOfBankroll: "string",
       conclusion: "string",
       evidence: ["string"],
       risks: ["string"],
@@ -132,6 +138,11 @@ Titan007 payload rule:
 - Each matchGroups item is one match and already contains the same match's five market blocks: asianFull, asianHalf, overUnderFull, overUnderHalf, europe.
 - Compare those five blocks together before ranking or concluding. Do not rank a single bookmaker row as if it were a separate match.
 - If any of the five blocks is missing, mention it in missingData/dataQuality.
+Top 10 recommendation rule:
+- Every top10 item MUST answer the user's practical question: "應該買咩".
+- Include recommendedBet, primaryMarket, selection, betDirection, riskLevel, and suggestedStakePctOfBankroll.
+- If the correct action is not to bet, set recommendedBet to "觀望 / no-bet" and explain why in conclusion/risks.
+- Do not output a Top 10 item with only generic analysis; the table must be usable as a betting decision shortlist.
 
 ${JSON.stringify(STRUCTURED_OUTPUT_SCHEMA, null, 2)}
 `;
@@ -1184,6 +1195,14 @@ function isRetryableAiError(error) {
     message.includes("econnreset") ||
     message.includes("etimedout") ||
     message.includes("timeout") ||
+    message.includes("ai http 429") ||
+    message.includes("ai http 500") ||
+    message.includes("ai http 502") ||
+    message.includes("ai http 503") ||
+    message.includes("ai http 504") ||
+    message.includes("ai http 522") ||
+    message.includes("ai http 524") ||
+    message.includes("ai http 554") ||
     message.includes("逾時") ||
     message.includes("中途斷開")
   );
