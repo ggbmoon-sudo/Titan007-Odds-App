@@ -40,10 +40,12 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "墨西聯",
   "阿甲",
   "巴西甲",
+  "巴西乙",
   "亞冠精英",
   "英甲",
   "英足總盃",
   "智利甲",
+  "智利盃",
   "智利女甲",
   "日職乙",
   "日女聯",
@@ -80,6 +82,7 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "德女聯",
   "澳維超",
   "世界盃及外圍賽",
+  "國際賽",
   "沙地聯",
   "阿聯酋聯",
   "卡塔爾王子盃",
@@ -88,13 +91,28 @@ const DEFAULT_ALLOWED_LEAGUES = [
 ];
 
 const LEAGUE_ALIASES = {
-  "世界盃及外圍賽": ["世界盃外圍賽", "世界杯外圍賽", "世界盃", "世界杯", "世盃外"],
+  "世界盃及外圍賽": ["世界盃外圍賽", "世界杯外圍賽", "世界盃", "世界杯", "世盃", "世杯", "世盃外", "世杯外"],
+  "國際賽": ["國際友誼", "国际友谊", "國際友誼賽", "国际友谊赛", "國際賽", "国际赛", "國際友賽", "国际友赛"],
   "世界冠軍球會盃": ["世界冠軍俱樂部盃", "世界冠軍俱樂部杯", "世俱盃", "世俱杯"],
   "美冠聯": ["美冠联", "美國冠軍聯賽", "美国冠军联赛", "美國足球冠軍聯賽", "USL Championship", "USL冠軍聯賽"],
   "美冠盃": ["美冠杯", "中北美冠軍盃", "中北美冠軍杯", "中北美洲冠軍盃", "中北美洲冠軍杯", "CONCACAF Champions Cup"],
   "美職業": ["美職聯", "美國職業大聯盟", "美職業聯賽"],
   "墨西聯": ["墨西联", "墨西哥聯賽", "墨西哥联赛", "墨西哥聯", "墨西哥联", "墨超"],
   "墨西聯春": ["墨西聯", "墨西联", "墨西哥聯春"],
+  "巴西乙": [
+    "巴乙",
+    "巴西乙組聯賽",
+    "巴西乙组联赛",
+    "巴西乙級聯賽",
+    "巴西乙级联赛",
+    "巴西足球乙級聯賽",
+    "巴西足球乙级联赛",
+    "Brazil Serie B",
+    "Brazilian Serie B",
+    "Brasileiro Serie B",
+    "Campeonato Brasileiro Serie B",
+  ],
+  "智利盃": ["智利杯", "智利足總盃", "智利足总杯", "Chile Cup", "Copa Chile"],
   "亞冠精英": ["亞冠精英聯賽"],
   "亞冠二": ["亞冠二級", "亞冠二級聯賽", "亞冠聯2"],
   "自由盃": ["南美自由盃", "解放者盃"],
@@ -2059,7 +2077,8 @@ function roundPercent(count, total) {
 }
 
 function headToHeadOverUnderStats(match, records, options = {}) {
-  const threshold = Number(options.threshold ?? 90);
+  const threshold = Number(options.threshold ?? 80);
+  const minSampleCount = Math.max(1, Number(options.minSampleCount ?? 8));
   const sourcePage = DEFAULT_REFERER;
   const homeTeamId = String(match?.homeTeamId || match?.homeId || "").trim();
   const awayTeamId = String(match?.awayTeamId || match?.awayId || "").trim();
@@ -2095,6 +2114,22 @@ function headToHeadOverUnderStats(match, records, options = {}) {
       note: "Titan007 往績檔未找到此對賽。",
     };
   }
+  if (sampleCount < minSampleCount) {
+    return {
+      ok: true,
+      noData: true,
+      matchId: match?.matchId || "",
+      match,
+      sourcePage,
+      stats: {
+        sampleCount,
+        minSampleCount,
+      },
+      hits: [],
+      error: "",
+      note: `對賽樣本只有 ${sampleCount} 場，少於 ${minSampleCount} 場，不作大小球計算。`,
+    };
+  }
 
   const overCount = history.filter((record) => record.totalGoals > 2.5).length;
   const underCount = sampleCount - overCount;
@@ -2125,6 +2160,7 @@ function headToHeadOverUnderStats(match, records, options = {}) {
     rawLine: historySummary,
     sourcePage,
     sourceLabel: "Live 往績",
+    minSampleCount,
   };
 
   const hits = [];
@@ -2153,6 +2189,7 @@ function headToHeadOverUnderStats(match, records, options = {}) {
     sourcePage,
     stats: {
       sampleCount,
+      minSampleCount,
       overCount,
       underCount,
       overPercent,
@@ -2186,14 +2223,15 @@ function mergeLiveMatchIds(items, liveMatches) {
 
 async function scanTitanHeadToHeadOverUnder(matchItems, options = {}) {
   const items = normalizeMatchItems(matchItems);
-  const threshold = Number(options.threshold ?? 90);
+  const threshold = Number(options.threshold ?? 80);
+  const minSampleCount = Math.max(1, Number(options.minSampleCount ?? 8));
   const needsLiveMeta = items.some((match) => !match.homeTeamId || !match.awayTeamId);
   const [records, liveMatches] = await Promise.all([
     fetchPanluRecords(options),
     needsLiveMeta ? fetchLiveMatches({ allowedLeagues: false }) : Promise.resolve([]),
   ]);
   const enrichedItems = needsLiveMeta ? mergeLiveMatchIds(items, liveMatches) : items;
-  const results = enrichedItems.map((match) => headToHeadOverUnderStats(match, records, { threshold }));
+  const results = enrichedItems.map((match) => headToHeadOverUnderStats(match, records, { threshold, minSampleCount }));
   const hits = results.flatMap((result) => result?.hits || []);
 
   return {
@@ -2201,6 +2239,7 @@ async function scanTitanHeadToHeadOverUnder(matchItems, options = {}) {
     mode: "head_to_head_over_under",
     label: "過往對賽大小球",
     threshold,
+    minSampleCount,
     total: items.length,
     okCount: results.filter((result) => result?.ok).length,
     errorCount: results.filter((result) => result && !result.ok).length,

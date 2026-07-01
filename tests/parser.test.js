@@ -641,6 +641,60 @@ test("parseLiveMatches searches inside the allowed league set", () => {
   assert.equal(matches[0].league, "韓K聯");
 });
 
+test("parseLiveMatches includes Chile Cup and Brazil Serie B aliases", () => {
+  const script = `
+    var A=Array(5);
+    A[1]="2501^#5ca39a^智利杯^智利杯^^主隊A^主隊A^^客隊A^客隊A^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[2]="2502^#5ca39a^Copa Chile^Copa Chile^^主隊B^主隊B^^客隊B^客隊B^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[3]="2503^#5ca39a^巴西乙組聯賽^巴西乙組聯賽^^主隊C^主隊C^^客隊C^客隊C^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[4]="2504^#5ca39a^Brazilian Serie B^Brazilian Serie B^^主隊D^主隊D^^客隊D^客隊D^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[5]="2505^#5ca39a^其他聯賽^其他聯賽^^主隊E^主隊E^^客隊E^客隊E^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+  `;
+
+  const defaultMatches = parseLiveMatches(script);
+  assert.deepEqual(
+    defaultMatches.map((match) => match.matchId),
+    ["2501", "2502", "2503", "2504"]
+  );
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("智利盃"));
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("巴西乙"));
+
+  const brazilSearch = parseLiveMatches(script, { league: "巴西乙組聯賽" });
+  assert.deepEqual(
+    brazilSearch.map((match) => match.matchId),
+    ["2503", "2504"]
+  );
+});
+
+test("parseLiveMatches includes international friendlies and World Cup short names", () => {
+  const script = `
+    var A=Array(4);
+    A[1]="2401^#5ca39a^國際友誼^國際友誼^^主隊A^主隊A^^客隊A^客隊A^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[2]="2402^#5ca39a^国际友谊^國際友誼^^主隊B^主隊B^^客隊B^客隊B^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[3]="2403^#5ca39a^世盃^世盃^^主隊C^主隊C^^客隊C^客隊C^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[4]="2404^#5ca39a^世界杯^世界杯^^主隊D^主隊D^^客隊D^客隊D^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+  `;
+
+  const defaultMatches = parseLiveMatches(script);
+  assert.deepEqual(
+    defaultMatches.map((match) => match.matchId),
+    ["2401", "2402", "2403", "2404"]
+  );
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("國際賽"));
+
+  const internationalSearch = parseLiveMatches(script, { league: "國際賽" });
+  assert.deepEqual(
+    internationalSearch.map((match) => match.matchId),
+    ["2401", "2402"]
+  );
+
+  const worldCupSearch = parseLiveMatches(script, { league: "世盃" });
+  assert.deepEqual(
+    worldCupSearch.map((match) => match.matchId),
+    ["2403", "2404"]
+  );
+});
+
 test("parseLiveMatches includes Japan top league current-year aliases", () => {
   const script = `
     var A=Array(1);
@@ -1112,7 +1166,7 @@ test("Titan panlu parser detects head-to-head over 90 percent signals", () => {
   const result = titanInternals.headToHeadOverUnderStats(
     { matchId: "1001", league: "比甲", homeTeamId: "11", awayTeamId: "22", home: "主", away: "客" },
     records,
-    { threshold: 90 }
+    { threshold: 90, minSampleCount: 1 }
   );
 
   assert.equal(records.length, 4);
@@ -1135,12 +1189,41 @@ test("Titan panlu parser detects head-to-head under 90 percent signals", () => {
   const result = titanInternals.headToHeadOverUnderStats(
     { matchId: "1002", league: "荷乙附", homeTeamId: "51", awayTeamId: "62" },
     records,
-    { threshold: 90 }
+    { threshold: 90, minSampleCount: 1 }
   );
 
   assert.equal(result.stats.underPercent, 100);
   assert.equal(result.hits.length, 1);
   assert.equal(result.hits[0].type, "小球");
+});
+
+test("Titan panlu head-to-head over/under requires at least 8 samples", () => {
+  const script = `
+    var p=new Array();
+    p[0]=['荷甲','#ff66aa','25-08-17',71,82,0,3,0,1,0.5];
+    p[1]=['荷甲','#ff66aa','24-04-25',82,71,1,3,1,1,-0.25];
+    p[2]=['荷甲','#ff66aa','23-12-07',71,82,5,1,3,1,1];
+    p[3]=['荷甲','#ff66aa','23-04-18',82,71,1,0,0,0,0];
+    p[4]=['荷甲','#ff66aa','23-02-26',82,71,3,1,1,1,0];
+    p[5]=['荷甲','#ff66aa','22-09-04',71,82,2,1,2,0,0];
+    p[6]=['荷甲','#ff66aa','22-04-03',71,82,3,3,3,1,0];
+    p[7]=['荷甲','#ff66aa','21-10-30',82,71,5,2,2,2,0];
+    p[8]=['荷甲','#ff66aa','21-02-06',82,71,3,0,2,0,0];
+    p[9]=['荷甲','#ff66aa','20-10-25',71,82,3,1,1,0,0];
+  `;
+
+  const records = titanInternals.parsePanluRecords(script);
+  const target = { matchId: "1003", league: "荷甲", homeTeamId: "71", awayTeamId: "82" };
+  const sevenSample = titanInternals.headToHeadOverUnderStats(target, records.slice(0, 7), { threshold: 80 });
+  const eightSample = titanInternals.headToHeadOverUnderStats(target, records.slice(0, 8), { threshold: 80 });
+
+  assert.equal(sevenSample.noData, true);
+  assert.equal(sevenSample.hits.length, 0);
+  assert.match(sevenSample.note, /少於 8 場/);
+  assert.equal(eightSample.noData, false);
+  assert.equal(eightSample.stats.sampleCount, 8);
+  assert.equal(eightSample.hits.length, 1);
+  assert.equal(eightSample.hits[0].type, "大球");
 });
 
 test("HKJC odds scanner detects configured odds patterns", () => {

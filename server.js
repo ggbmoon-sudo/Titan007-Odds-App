@@ -509,9 +509,11 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const threshold = Number(body.threshold ?? requestUrl.searchParams.get("threshold") ?? 90);
+      const threshold = Number(body.threshold ?? requestUrl.searchParams.get("threshold") ?? 80);
+      const minSampleCount = Number(body.minSampleCount ?? requestUrl.searchParams.get("minSampleCount") ?? 8);
       const data = await scanTitanHeadToHeadOverUnder(matches, {
         threshold,
+        minSampleCount,
         timeoutMs: Number(body.timeoutMs || requestUrl.searchParams.get("timeoutMs") || 30000),
       });
       sendJson(res, 200, { ok: true, data });

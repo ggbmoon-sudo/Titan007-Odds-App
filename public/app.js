@@ -103,6 +103,7 @@ const els = {
   probabilityWindowInput: document.getElementById("probabilityWindowInput"),
   probabilityScanBtn: document.getElementById("probabilityScanBtn"),
   h2hOuScanBtn: document.getElementById("h2hOuScanBtn"),
+  selectFourHourBtn: document.getElementById("selectFourHourBtn"),
   titanGuessScanBtn: document.getElementById("titanGuessScanBtn"),
   extractFourHourBtn: document.getElementById("extractFourHourBtn"),
   extractHkjcSixHourBtn: document.getElementById("extractHkjcSixHourBtn"),
@@ -1196,6 +1197,7 @@ function updateSummary() {
       { label: "分批", value: state.probability.batchCount ? `${state.probability.batchCount} x ≤${state.probability.chunkSize || BATCH_EXTRACT_LIMIT}` : "1" },
       { label: "Worker", value: state.probability.concurrency || 1 },
       { label: thresholdLabel, value: state.probability.hitCount || 0 },
+      ...(state.probability.minSampleCount ? [{ label: "最少對賽", value: `${state.probability.minSampleCount}場` }] : []),
       { label: "無資料", value: state.probability.noDataCount || 0 },
       { label: "錯誤", value: errors, className: errors ? "warning" : "" },
     ]);
@@ -1238,6 +1240,7 @@ function updateSummary() {
     const items = batchItems();
     const rowTotal = flattenForCsv().length;
     const failed = (state.batch.results || []).filter((result) => !result.ok).length;
+    const retryableCount = retryableBatchResults().length;
     const durations = (state.batch.results || [])
       .map((result) => Number(result.durationMs || 0))
       .filter((duration) => Number.isFinite(duration) && duration > 0);
@@ -1267,6 +1270,7 @@ function updateSummary() {
       { label: "可匯出列數", value: rowTotal },
       { label: "提取失敗", value: failed, className: failed ? "warning" : "" },
       { label: "市場錯誤", value: marketErrors, className: marketErrors ? "warning" : "" },
+      { label: "可重試", value: retryableCount, className: retryableCount ? "warning" : "" },
     ]);
     updateAnalysisButton();
     return;
@@ -1350,6 +1354,55 @@ function activeSectionEntries(tab) {
   }
 
   return { entries, errors, warnings };
+}
+
+function titanMarketSections(data) {
+  if (!data) return [];
+  return [
+    { key: "asianFull", label: "亞盤 全場", section: data.asian?.full },
+    { key: "asianHalf", label: "亞盤 半場", section: data.asian?.half },
+    { key: "overUnderFull", label: "大小 全場", section: data.overUnder?.full },
+    { key: "overUnderHalf", label: "大小 半場", section: data.overUnder?.half },
+    { key: "europe", label: "歐洲賠率", section: data.europe },
+  ];
+}
+
+function retryIgnoredMissingBookmaker(label) {
+  const text = String(label || "").toLowerCase();
+  return /hkjc|hk jockey|香港賽馬會|香港赛马会|香港馬|香港马/.test(text);
+}
+
+function batchResultRetryIssues(result) {
+  if (!result) return [];
+  if (!result.ok || !result.data) {
+    return [{ type: "match_error", label: "整場提取", detail: result.error || "沒有回傳資料" }];
+  }
+
+  const issues = [];
+  for (const item of titanMarketSections(result.data)) {
+    if (item.section?.error) {
+      issues.push({ type: "market_error", label: item.label, detail: item.section.error });
+    }
+    const missing = (item.section?.missingTargetBookmakerLabels || []).filter(
+      (label) => !retryIgnoredMissingBookmaker(label)
+    );
+    if (missing.length) {
+      issues.push({ type: "bookmaker_missing", label: item.label, detail: `缺：${missing.join("、")}` });
+    }
+  }
+  return issues;
+}
+
+function retryableBatchResults() {
+  if (!state.batch?.results?.length) return [];
+  const seen = new Set();
+  return (state.batch.results || []).filter((result) => {
+    const matchId = String(result?.matchId || result?.match?.matchId || "").trim();
+    if (!matchId || seen.has(matchId)) return false;
+    const retryable = batchResultRetryIssues(result).length > 0;
+    if (retryable) seen.add(matchId);
+    return retryable;
+  });
 }
 
 function summarizeTechnicalError(error) {
@@ -1443,6 +1496,14 @@ function renderCoverageWarnings(warnings) {
 
 function renderExtractionProgress() {
   if (!state.batch?.results?.length && !state.batch?.partial) return "";
+  const retryable = retryableBatchResults();
+  const retryStatus = state.batch?.retryStatus || null;
+  const retryAction = retryable.length
+    ? `<button class="mini-action retry-batch-errors" type="button" ${state.working ? "disabled" : ""}>重試有問題場次 (${retryable.length})</button>`
+    : "";
+  const headLabel = retryStatus
+    ? `重試中 ${retryStatus.completed || 0}/${retryStatus.total || 0}`
+    : `${state.batch.completedCount || 0} / ${state.batch.total || 0}`;
   const rows = (state.batch.results || [])
     .slice(-8)
     .map((result) => {
@@ -1464,7 +1525,8 @@ function renderExtractionProgress() {
     <div class="extract-progress-panel">
       <div class="extract-progress-head">
         <strong>逐場提取進度</strong>
-        <span>${escapeHtml(state.batch.completedCount || 0)} / ${escapeHtml(state.batch.total || 0)}</span>
+        <span>${escapeHtml(headLabel)}</span>
+        ${retryAction}
       </div>
       <div class="extract-progress-list">${rows}</div>
     </div>
@@ -1886,13 +1948,14 @@ function setMatchButtons(enabled) {
   els.probabilityScanBtn.disabled = state.working;
   if (els.h2hOuScanBtn) els.h2hOuScanBtn.disabled = state.working;
   if (els.titanGuessScanBtn) els.titanGuessScanBtn.disabled = state.working;
+  if (els.selectFourHourBtn) els.selectFourHourBtn.disabled = state.working;
   if (els.extractFourHourBtn) els.extractFourHourBtn.disabled = state.working;
   if (els.hkjcSpecialOddsBtn) els.hkjcSpecialOddsBtn.disabled = state.working;
   if (els.hkjcCrsEqualOddsBtn) els.hkjcCrsEqualOddsBtn.disabled = state.working;
   if (els.networkDiagnosticsBtn) els.networkDiagnosticsBtn.disabled = state.working;
-  els.extractHkjcSixHourBtn.disabled = state.working;
-  els.extractHkjcTwelveHourBtn.disabled = state.working;
-  els.extractHkjcEighteenHourBtn.disabled = state.working;
+  if (els.extractHkjcSixHourBtn) els.extractHkjcSixHourBtn.disabled = state.working;
+  if (els.extractHkjcTwelveHourBtn) els.extractHkjcTwelveHourBtn.disabled = state.working;
+  if (els.extractHkjcEighteenHourBtn) els.extractHkjcEighteenHourBtn.disabled = state.working;
   updateSelectedButton();
 }
 
@@ -1953,10 +2016,11 @@ function setWorking(isWorking) {
   els.probabilityScanBtn.disabled = isWorking;
   if (els.h2hOuScanBtn) els.h2hOuScanBtn.disabled = isWorking;
   if (els.titanGuessScanBtn) els.titanGuessScanBtn.disabled = isWorking;
+  if (els.selectFourHourBtn) els.selectFourHourBtn.disabled = isWorking;
   if (els.extractFourHourBtn) els.extractFourHourBtn.disabled = isWorking;
-  els.extractHkjcSixHourBtn.disabled = isWorking;
-  els.extractHkjcTwelveHourBtn.disabled = isWorking;
-  els.extractHkjcEighteenHourBtn.disabled = isWorking;
+  if (els.extractHkjcSixHourBtn) els.extractHkjcSixHourBtn.disabled = isWorking;
+  if (els.extractHkjcTwelveHourBtn) els.extractHkjcTwelveHourBtn.disabled = isWorking;
+  if (els.extractHkjcEighteenHourBtn) els.extractHkjcEighteenHourBtn.disabled = isWorking;
   els.selectAllBtn.disabled = isWorking || !state.loadedMatches.length;
   els.clearSelectionBtn.disabled = isWorking || !state.loadedMatches.length;
   els.extractLoadedBtn.disabled = isWorking || !state.loadedMatches.length;
@@ -2583,6 +2647,150 @@ async function extractBatch(matches, options = {}) {
   }
 }
 
+async function retryProblemBatchMatches() {
+  const retryable = retryableBatchResults();
+  if (!retryable.length) {
+    setStatus("沒有需要重試的場次");
+    return;
+  }
+
+  const currentResults = [...(state.batch?.results || [])];
+  const baseBatch = { ...(state.batch || {}) };
+  const retryMatches = retryable.map((result) => ({
+    ...matchById(result.matchId),
+    ...(result.data?.match || {}),
+    ...(result.match || {}),
+    matchId: String(result.matchId || result.match?.matchId || "").trim(),
+    sourceIndex: result.sourceIndex ?? currentResults.findIndex((item) => String(item?.matchId) === String(result.matchId)),
+  }));
+  const concurrency = Math.max(1, Math.min(workerCount(), retryMatches.length, 3));
+  let completed = 0;
+  let nextIndex = 0;
+  let localCacheUpdatedCount = 0;
+  let latestLocalCache = baseBatch.localCache || null;
+
+  const replaceResult = (nextResult) => {
+    const matchId = String(nextResult.matchId || nextResult.match?.matchId || "").trim();
+    const index = currentResults.findIndex((result) => String(result?.matchId || result?.match?.matchId || "") === matchId);
+    if (index >= 0) {
+      currentResults[index] = { ...currentResults[index], ...nextResult };
+    } else {
+      currentResults.push(nextResult);
+    }
+  };
+
+  const publishRetryBatch = (retrying = true) => {
+    const orderedResults = [...currentResults].sort((a, b) => (a.sourceIndex ?? 0) - (b.sourceIndex ?? 0));
+    const nextLocalCache = latestLocalCache
+      ? {
+          ...latestLocalCache,
+          updatedCount: (baseBatch.localCache?.updatedCount || 0) + localCacheUpdatedCount,
+        }
+      : localCacheUpdatedCount
+        ? { updatedCount: localCacheUpdatedCount }
+        : null;
+    state.batch = {
+      ...baseBatch,
+      results: orderedResults,
+      total: baseBatch.total || orderedResults.length,
+      okCount: orderedResults.filter((result) => result?.ok).length,
+      errorCount: orderedResults.filter((result) => result && !result.ok).length,
+      completedCount: baseBatch.completedCount || orderedResults.length,
+      partial: false,
+      retryStatus: retrying
+        ? {
+            completed,
+            total: retryMatches.length,
+          }
+        : null,
+      localCache: nextLocalCache,
+    };
+    updateSummary();
+    renderActiveTab();
+    setExportButtons(orderedResults.some((result) => result?.ok && result.data));
+  };
+
+  setStatus(`重試有問題場次 0/${retryMatches.length} · ${concurrency} worker`);
+  setWorking(true);
+  clearAnalysis();
+  publishRetryBatch(true);
+
+  try {
+    const worker = async () => {
+      while (nextIndex < retryMatches.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const match = retryMatches[index];
+        const startedAt = Date.now();
+        setStatus(`重試有問題場次 ${completed}/${retryMatches.length} · 正在 ${index + 1}/${retryMatches.length}`);
+        try {
+          const body = await postJson("/api/extract-batch", {
+            matches: [match],
+            includeMulti: includeMultiEnabled(),
+            extractionMode: baseBatch.extractionMode || extractionMode(),
+            concurrency: 1,
+          });
+          if (body.data.localCache) {
+            latestLocalCache = body.data.localCache;
+            localCacheUpdatedCount += body.data.localCache.updatedCount || 0;
+          }
+          const result = (body.data.results || [])[0];
+          replaceResult(
+            result
+              ? {
+                  ...result,
+                  sourceIndex: match.sourceIndex,
+                  durationMs: Date.now() - startedAt,
+                  completedAt: new Date().toISOString(),
+                  match: { ...match, ...(result.match || {}) },
+                }
+              : {
+                  ok: false,
+                  matchId: match.matchId,
+                  match,
+                  data: null,
+                  sourceIndex: match.sourceIndex,
+                  durationMs: Date.now() - startedAt,
+                  completedAt: new Date().toISOString(),
+                  error: "沒有回傳結果",
+                }
+          );
+        } catch (error) {
+          replaceResult({
+            ok: false,
+            matchId: match.matchId,
+            match,
+            data: null,
+            sourceIndex: match.sourceIndex,
+            durationMs: Date.now() - startedAt,
+            completedAt: new Date().toISOString(),
+            error: error.message || String(error),
+          });
+        }
+        completed += 1;
+        publishRetryBatch(true);
+      }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+    publishRetryBatch(false);
+    const remaining = retryableBatchResults().length;
+    setStatus(remaining ? `重試完成 · 仍有 ${remaining} 場需留意` : "重試完成");
+    loadLocalTitanCache({ silent: true });
+  } catch (error) {
+    if (state.batch) {
+      state.batch = { ...state.batch, retryStatus: null };
+      updateSummary();
+      renderActiveTab();
+    }
+    els.tableWrap.insertAdjacentHTML("afterbegin", renderTechnicalErrorBox("重試失敗", error));
+    setStatus("重試錯誤");
+  } finally {
+    setWorking(false);
+    updateSelectedButton();
+  }
+}
+
 function extractBatchFromInput() {
   const ids = parseMatchIds(els.matchIdInput.value);
   extractBatch(ids.map(matchById));
@@ -2726,6 +2934,36 @@ async function extractFourHourUpcoming() {
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("錯誤");
+  }
+}
+
+async function selectFourHourUpcoming() {
+  setStatus("選擇未來4小時中");
+  setWorking(true);
+  try {
+    if (!state.loadedMatches.length) {
+      await loadMatches({ rethrow: true, skipHkjcAutoCheck: true });
+    }
+
+    const targets = state.loadedMatches.filter(
+      (match) => isNotStartedMatch(match) && isWithinUpcomingHourRange(match, 0, 4)
+    );
+    selectOnlyMatches(targets);
+
+    if (!targets.length) {
+      els.tableWrap.innerHTML = `<div class="empty">未來 4 小時內沒有未開賽 Titan 目標賽事</div>`;
+      setStatus("沒有4小時賽事");
+      return;
+    }
+
+    els.tableWrap.innerHTML = `<div class="empty">已選擇未來 4 小時 ${targets.length} 場，尚未提取。你可以再按「提取已選」或「提取未來4小時」。</div>`;
+    setStatus(`已選未來4小時 ${targets.length}場`);
+  } catch (error) {
+    els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+    setStatus("錯誤");
+  } finally {
+    setWorking(false);
+    updateSelectedButton();
   }
 }
 
@@ -3001,7 +3239,7 @@ async function scanHeadToHeadOverUnder() {
     return;
   }
 
-  setStatus(`掃對賽大小90% ${range.label} 0/${matches.length}`);
+  setStatus(`掃對賽大小80% ${range.label} 0/${matches.length}`);
   setWorking(true);
   setExportButtons(false);
   clearAnalysis();
@@ -3010,7 +3248,8 @@ async function scanHeadToHeadOverUnder() {
   try {
     const body = await postJson("/api/head-to-head-over-under", {
       matches,
-      threshold: 90,
+      threshold: 80,
+      minSampleCount: 8,
       timeoutMs: 45000,
     });
     state.probability = {
@@ -3031,7 +3270,7 @@ async function scanHeadToHeadOverUnder() {
     updateSummary();
     renderProbabilityTable();
     setExportButtons(true);
-    setStatus(`對賽大小90%+ ${state.probability.hitCount || 0}筆`);
+    setStatus(`對賽大小80%+ ${state.probability.hitCount || 0}筆`);
   } catch (error) {
     state.probability = null;
     state.titanGuess = null;
@@ -5316,10 +5555,11 @@ els.quickExtractBtn.addEventListener("click", quickExtract);
 els.probabilityScanBtn.addEventListener("click", scanProbabilityEventsPerMatch);
 els.h2hOuScanBtn?.addEventListener("click", scanHeadToHeadOverUnder);
 els.titanGuessScanBtn?.addEventListener("click", scanTitanGuess);
+els.selectFourHourBtn?.addEventListener("click", selectFourHourUpcoming);
 els.extractFourHourBtn?.addEventListener("click", extractFourHourUpcoming);
-els.extractHkjcSixHourBtn.addEventListener("click", extractHkjcSixHourOpen);
-els.extractHkjcTwelveHourBtn.addEventListener("click", extractHkjcTwelveHourOpen);
-els.extractHkjcEighteenHourBtn.addEventListener("click", extractHkjcEighteenHourOpen);
+els.extractHkjcSixHourBtn?.addEventListener("click", extractHkjcSixHourOpen);
+els.extractHkjcTwelveHourBtn?.addEventListener("click", extractHkjcTwelveHourOpen);
+els.extractHkjcEighteenHourBtn?.addEventListener("click", extractHkjcEighteenHourOpen);
 els.extractBtn.addEventListener("click", extract);
 els.batchExtractBtn.addEventListener("click", extractBatchFromInput);
 els.hkjcSpecialOddsBtn?.addEventListener("click", scanHkjcSpecialOdds);
@@ -5442,6 +5682,12 @@ els.matchList.addEventListener("change", (event) => {
 els.tableWrap.addEventListener("change", (event) => {
   if (!event.target.matches(".hkjc-hit-check")) return;
   updateAnalysisButton();
+});
+
+els.tableWrap.addEventListener("click", (event) => {
+  const button = event.target.closest(".retry-batch-errors");
+  if (!button) return;
+  retryProblemBatchMatches();
 });
 
 els.featurePanel.addEventListener("click", (event) => {

@@ -279,6 +279,8 @@ const COMPETITION_ALIAS_GROUPS = [
   ["日职联", "日職聯", "日职百年构想联赛", "日職百年構想聯賽", "j1 league"],
   ["澳昆超", "澳洲全國聯賽昆士蘭", "澳洲全國聯賽 - 昆士蘭", "npl queensland"],
   ["澳威超", "澳洲全國聯賽新南威爾斯", "澳洲全國聯賽 - 新南威爾斯", "npl new south wales", "npl nsw"],
+  ["智利盃", "智利杯", "智利足總盃", "智利足总杯", "chile cup", "copa chile"],
+  ["巴西乙", "巴乙", "巴西乙組聯賽", "巴西乙组联赛", "brazil serie b", "brazilian serie b", "brasileiro serie b"],
 ];
 
 const TEAM_ALIAS_GROUPS = [
