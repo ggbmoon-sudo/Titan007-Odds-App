@@ -179,6 +179,42 @@ test("Titan V guess index parser keeps all target-league rows with hidden values
   assert.equal(parsed.matches[0].hot, true);
 });
 
+test("Titan V guess index parser includes Europa, Conference, Chile, and Scotland League Cup targets", () => {
+  const makeBlock = ({ position, matchId, league }) => `
+    <div class="match" id="match_position_${position}">
+      <div class="status">
+        <div class="game_guess">${league}<i>05-06 13:00</i><p></p></div>
+        <span class="time blue" id="time_${matchId}" timestate="0">未</span>
+      </div>
+      <div class="guessBox">
+        <div class="HTeam team" id="home_${matchId}" teamname="Home ${matchId}">Home ${matchId}</div>
+        <div class="guessInfo">
+          <div id="let_jd_${matchId}" data-count="59" class="guessBar ">
+            <div class="guessData"><span class="hCount">72%</span><span id="${matchId}_let" odds="0.5">半球</span><span class="gCount">28%</span></div>
+          </div>
+        </div>
+        <div class="GTeam team" id="guest_${matchId}" teamname="Away ${matchId}">Away ${matchId}</div>
+      </div>
+    </div>
+    <div class="popupGuessTD"></div>
+  `;
+  const html = [
+    makeBlock({ position: 1, matchId: "3101", league: "欧罗巴杯" }),
+    makeBlock({ position: 2, matchId: "3102", league: "欧会杯" }),
+    makeBlock({ position: 3, matchId: "3103", league: "智利联杯" }),
+    makeBlock({ position: 4, matchId: "3104", league: "蘇格蘭聯賽盃" }),
+    makeBlock({ position: 5, matchId: "3105", league: "其他聯賽" }),
+  ].join("");
+
+  const parsed = parseTitanGuessIndexPage(html);
+  assert.deepEqual(
+    parsed.matches.map((match) => match.matchId),
+    ["3101", "3102", "3103", "3104"]
+  );
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("智利聯杯"));
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("蘇聯盃"));
+});
+
 test("Titan V guess index parser filters live and finished rows for prematch scan", () => {
   const makeBlock = ({ position, matchId, state, kickoff, home, away }) => `
     <div class="match" id="match_position_${position}">

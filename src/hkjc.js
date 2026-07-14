@@ -276,10 +276,12 @@ const COMPETITION_ALIAS_GROUPS = [
   ["南美杯", "南美盃", "南美球会杯", "南美球會盃", "sudamericana", "copa sudamericana"],
   ["欧霸杯", "歐霸盃", "欧罗巴杯", "歐羅巴盃", "欧洲联赛", "歐洲聯賽", "europa league"],
   ["欧会杯", "歐會盃", "欧洲协会联赛", "歐洲協會聯賽", "conference league"],
+  ["蘇聯盃", "苏联杯", "蘇格蘭聯賽盃", "苏格兰联赛杯", "scottish league cup", "scotland league cup"],
   ["日职联", "日職聯", "日职百年构想联赛", "日職百年構想聯賽", "j1 league"],
   ["澳昆超", "澳洲全國聯賽昆士蘭", "澳洲全國聯賽 - 昆士蘭", "npl queensland"],
   ["澳威超", "澳洲全國聯賽新南威爾斯", "澳洲全國聯賽 - 新南威爾斯", "npl new south wales", "npl nsw"],
   ["智利盃", "智利杯", "智利足總盃", "智利足总杯", "chile cup", "copa chile"],
+  ["智利聯杯", "智利联杯", "智利聯賽盃", "智利联赛杯", "chile league cup", "copa de la liga chile"],
   ["巴西乙", "巴乙", "巴西乙組聯賽", "巴西乙组联赛", "brazil serie b", "brazilian serie b", "brasileiro serie b"],
 ];
 
