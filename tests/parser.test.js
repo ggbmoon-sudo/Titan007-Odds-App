@@ -731,6 +731,45 @@ test("parseLiveMatches includes international friendlies and World Cup short nam
   );
 });
 
+test("parseLiveMatches includes Liga MX Apertura, Danish Superliga, and Swiss Super League aliases", () => {
+  const script = `
+    var A=Array(6);
+    A[1]="2601^#5ca39a^墨西聯秋^墨西聯秋^^主隊A^主隊A^^客隊A^客隊A^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[2]="2602^#5ca39a^墨西哥超级联赛^墨西哥超级联赛^^主隊B^主隊B^^客隊B^客隊B^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[3]="2603^#5ca39a^丹麥超^丹麥超^^主隊C^主隊C^^客隊C^客隊C^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[4]="2604^#5ca39a^丹麦超级联赛^丹麦超级联赛^^主隊D^主隊D^^客隊D^客隊D^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[5]="2605^#5ca39a^瑞士超^瑞士超^^主隊E^主隊E^^客隊E^客隊E^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[6]="2606^#5ca39a^瑞士超级联赛^瑞士超级联赛^^主隊F^主隊F^^客隊F^客隊F^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+  `;
+
+  const defaultMatches = parseLiveMatches(script);
+  assert.deepEqual(
+    defaultMatches.map((match) => match.matchId),
+    ["2601", "2602", "2603", "2604", "2605", "2606"]
+  );
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("墨西聯秋"));
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("丹麥超"));
+  assert.ok(DEFAULT_ALLOWED_LEAGUES.includes("瑞士超"));
+
+  const mexicoSearch = parseLiveMatches(script, { league: "墨西哥超級聯賽" });
+  assert.deepEqual(
+    mexicoSearch.map((match) => match.matchId),
+    ["2601", "2602"]
+  );
+
+  const denmarkSearch = parseLiveMatches(script, { league: "丹麥超級聯賽" });
+  assert.deepEqual(
+    denmarkSearch.map((match) => match.matchId),
+    ["2603", "2604"]
+  );
+
+  const swissSearch = parseLiveMatches(script, { league: "瑞士超級聯賽" });
+  assert.deepEqual(
+    swissSearch.map((match) => match.matchId),
+    ["2605", "2606"]
+  );
+});
+
 test("parseLiveMatches includes Japan top league current-year aliases", () => {
   const script = `
     var A=Array(1);
