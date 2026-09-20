@@ -1599,6 +1599,305 @@ td.muted,
   }
 }
 
+/* Desktop workflow refresh */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.app-layout {
+  grid-template-columns: 440px minmax(0, 1fr);
+  height: calc(100vh - 72px);
+  min-height: 0;
+}
+
+.control-panel,
+.content-panel {
+  min-height: 0;
+  overflow: auto;
+}
+
+.content-panel {
+  display: block;
+}
+
+.section-title-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.section-title-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workflow-section {
+  padding-bottom: 12px;
+}
+
+.load-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.load-controls button {
+  min-width: 130px;
+}
+
+.match-updated {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.match-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.match-filters .wide-filter {
+  grid-column: 1 / -1;
+}
+
+.match-filters label + label {
+  margin-top: 0;
+}
+
+.match-list {
+  min-height: 300px;
+  max-height: 48vh;
+  background: #09111d;
+}
+
+.match-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 11px 14px;
+}
+
+.match-row strong {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.match-row-topline {
+  display: flex !important;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.match-row-topline strong {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.match-meta {
+  margin-top: 4px;
+  font-size: 12px !important;
+}
+
+.match-status-badge {
+  display: inline-flex !important;
+  flex: 0 0 auto;
+  width: fit-content;
+  min-height: 20px;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 10px !important;
+  font-weight: 800;
+}
+
+.match-status-badge.upcoming {
+  border-color: rgba(74, 222, 128, 0.4);
+  color: var(--green);
+}
+
+.match-status-badge.live {
+  border-color: rgba(251, 113, 133, 0.45);
+  color: var(--red);
+}
+
+.match-status-badge.finished {
+  color: var(--muted);
+}
+
+.quick-extract {
+  align-self: center;
+}
+
+.filter-empty button {
+  margin-top: 12px;
+}
+
+.selection-toolbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
+  background: rgba(10, 18, 32, 0.97);
+  box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
+}
+
+.selection-secondary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.selection-toolbar button {
+  min-width: 0;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.collapsible-section {
+  padding: 0;
+}
+
+.collapsible-section > summary,
+.inner-settings > summary {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.collapsible-section > summary::-webkit-details-marker,
+.inner-settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-section > summary:hover,
+.inner-settings > summary:hover {
+  color: var(--accent-strong);
+}
+
+.summary-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--accent-strong);
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.collapsible-section[open] .summary-icon {
+  transform: rotate(45deg);
+}
+
+.collapsible-body {
+  padding: 0 14px 14px;
+}
+
+.inner-settings {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.inner-settings > summary {
+  min-height: 42px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.hkjc-actions,
+.download-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.hkjc-actions button {
+  width: 100%;
+}
+
+.download-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.download-grid button {
+  min-width: 0;
+  padding-inline: 6px;
+  font-size: 11px;
+}
+
+.command-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  grid-template-columns: minmax(360px, 1fr) auto auto;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+.result-panel,
+.analysis-panel {
+  width: 100%;
+  min-height: 0;
+  border-left: 0;
+}
+
+.table-wrap {
+  height: 540px;
+  min-height: 420px;
+}
+
+.analysis-panel {
+  border-top: 1px solid var(--line);
+  overflow: visible;
+}
+
+.feature-grid,
+.framework-strip {
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+}
+
+.ai-panels {
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+}
+
+.wide-panel {
+  grid-column: span 2;
+}
+
+@media (max-width: 1380px) {
+  .app-layout {
+    grid-template-columns: 400px minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 760px) {
   .app-header,
   .result-heading {
@@ -1918,5 +2217,61 @@ tr:nth-child(even) td {
 
   .analysis-panel {
     border-left: 0;
+  }
+}
+
+@media (min-width: 1101px) {
+  .app-layout {
+    grid-template-columns: 420px minmax(0, 1fr);
+  }
+
+  .content-panel {
+    display: block;
+  }
+
+  .command-bar {
+    grid-template-columns: minmax(360px, 1fr) auto auto;
+  }
+
+  .command-bar,
+  .summary-grid,
+  .result-panel,
+  .analysis-panel {
+    width: 100%;
+  }
+
+  .result-panel,
+  .analysis-panel {
+    min-height: 0;
+  }
+
+  .analysis-panel {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    overflow: visible;
+  }
+
+  .table-wrap {
+    height: 540px;
+    min-height: 420px;
+  }
+
+  .feature-grid,
+  .framework-strip {
+    grid-template-columns: repeat(5, minmax(150px, 1fr));
+  }
+
+  .ai-panels {
+    grid-template-columns: repeat(3, minmax(260px, 1fr));
+  }
+
+  .wide-panel {
+    grid-column: span 2;
+  }
+}
+
+@media (min-width: 1500px) {
+  .app-layout {
+    grid-template-columns: 440px minmax(0, 1fr);
   }
 }

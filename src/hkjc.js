@@ -3,6 +3,15 @@ const zlib = require("node:zlib");
 
 const HKJC_GRAPHQL_URL = "https://info.cld.hkjc.com/graphql/base/";
 const HKJC_REFERER = "https://bet.hkjc.com/ch/football/had";
+const HKJC_CATALOG_CACHE_TTL_MS = 30000;
+const HKJC_AGENT = new https.Agent({
+  keepAlive: true,
+  maxSockets: 8,
+  maxFreeSockets: 4,
+});
+
+let hkjcCatalogCache = null;
+let hkjcCatalogPromise = null;
 
 const HKJC_POOLS = {
   HAD: {
@@ -96,7 +105,7 @@ function decodeResponse(buffer, encoding) {
   return buffer.toString("utf8");
 }
 
-function postGraphql(body, options = {}) {
+function postGraphqlOnce(body, options = {}) {
   const payload = JSON.stringify(body);
   const timeoutMs = options.timeoutMs || 20000;
 
@@ -118,6 +127,7 @@ function postGraphql(body, options = {}) {
       {
         method: "POST",
         timeout: timeoutMs,
+        agent: HKJC_AGENT,
         headers: {
           "content-type": "application/json",
           "content-length": Buffer.byteLength(payload),
@@ -135,9 +145,17 @@ function postGraphql(body, options = {}) {
         res.on("end", () => {
           try {
             const text = decodeResponse(Buffer.concat(chunks), res.headers["content-encoding"]);
+            if (res.statusCode < 200 || res.statusCode >= 300) {
+              const error = new Error(`HKJC HTTP ${res.statusCode}: ${text.slice(0, 300)}`);
+              error.statusCode = res.statusCode;
+              finish(reject, error);
+              return;
+            }
             const json = JSON.parse(text);
             if (json.errors?.length) {
-              finish(reject, new Error(json.errors.map((error) => error.message).join(" | ")));
+              const error = new Error(json.errors.map((item) => item.message).join(" | "));
+              error.graphql = true;
+              finish(reject, error);
               return;
             }
             finish(resolve, json);
@@ -152,6 +170,36 @@ function postGraphql(body, options = {}) {
     req.on("error", (error) => finish(reject, error));
     req.end(payload);
   });
+}
+
+function isRetryableHkjcError(error) {
+  const statusCode = Number(error?.statusCode || 0);
+  if (statusCode === 429 || statusCode >= 500) return true;
+  const message = String(error?.message || error || "");
+  return /timeout|timed out|socket hang up|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|ETIMEDOUT|temporar|internal server error/i.test(
+    message
+  );
+}
+
+function retryDelay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function postGraphql(body, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts || 2));
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await postGraphqlOnce(body, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isRetryableHkjcError(error)) throw error;
+      await retryDelay(Math.min(1000, 250 * attempt));
+    }
+  }
+
+  throw lastError;
 }
 
 async function fetchHkjcPool(poolKey, options = {}) {
@@ -589,37 +637,70 @@ function hkjcOpenRecord(match, poolKeys) {
   };
 }
 
+function hkjcCatalogOpenRecord(match, poolKeys) {
+  const sellingPools = new Set(match.poolInfo?.sellingPools || []);
+  const poolTypes = [];
+
+  for (const poolKey of poolKeys) {
+    const config = HKJC_POOLS[poolKey];
+    for (const oddsType of config?.oddsTypes || []) {
+      if (sellingPools.has(oddsType)) poolTypes.push(oddsType);
+    }
+  }
+
+  const uniquePoolTypes = [...new Set(poolTypes)];
+  return {
+    ...baseMatch(match),
+    pools: uniquePoolTypes.map((pool) => ({
+      pool,
+      status: "SELLINGSTARTED",
+      lineCount: 0,
+      sourcePage: `https://bet.hkjc.com/ch/football/${sourcePageFromOddsType(pool)}`,
+    })),
+    poolTypes: uniquePoolTypes,
+    sourcePools: ["HAD"],
+  };
+}
+
+async function fetchHkjcCatalog(options = {}) {
+  const now = Date.now();
+  const cacheTtlMs = Math.max(0, Number(options.cacheTtlMs ?? HKJC_CATALOG_CACHE_TTL_MS));
+  if (!options.bypassCache && hkjcCatalogCache && hkjcCatalogCache.expiresAt > now) {
+    return hkjcCatalogCache.matches;
+  }
+  if (!options.bypassCache && hkjcCatalogPromise) return hkjcCatalogPromise;
+
+  const request = fetchHkjcPool("HAD", {
+    timeoutMs: Number(options.poolTimeoutMs || options.timeoutMs || 15000),
+  }).then((matches) => {
+    hkjcCatalogCache = {
+      expiresAt: Date.now() + cacheTtlMs,
+      matches,
+    };
+    return matches;
+  });
+
+  if (options.bypassCache) return request;
+  hkjcCatalogPromise = request;
+  try {
+    return await request;
+  } finally {
+    if (hkjcCatalogPromise === request) hkjcCatalogPromise = null;
+  }
+}
+
 async function fetchHkjcOpenMatches(options = {}) {
   const poolKeys = options.poolKeys || ["HAD", "FHA", "HHA", "HIL", "FHL"];
   const hours = Number(options.hours || 72);
-  const poolTimeoutMs = Number(options.poolTimeoutMs || options.timeoutMs || 15000);
   const startTime = options.now ? new Date(options.now) : new Date();
   const endTime = new Date(startTime.getTime() + Math.max(1, hours) * 60 * 60 * 1000);
-  const matchesById = new Map();
   const errors = [];
+  let catalogMatches = [];
 
-  const results = await Promise.all(
-    poolKeys.map(async (poolKey) => {
-      try {
-        return { poolKey, matches: await fetchHkjcPool(poolKey, { timeoutMs: poolTimeoutMs }), error: "" };
-      } catch (error) {
-        return { poolKey, matches: [], error: error.message || String(error) };
-      }
-    })
-  );
-
-  for (const result of results) {
-    if (result.error) {
-      errors.push({ pool: result.poolKey, error: result.error });
-      continue;
-    }
-
-    for (const match of result.matches) {
-      if (!isWithinWindow(match, startTime, endTime)) continue;
-      const current = matchesById.get(match.id) || { ...match, foPools: [] };
-      current.foPools.push(...(match.foPools || []));
-      matchesById.set(match.id, current);
-    }
+  try {
+    catalogMatches = await fetchHkjcCatalog(options);
+  } catch (error) {
+    errors.push({ pool: "HAD", error: error.message || String(error) });
   }
 
   return {
@@ -627,8 +708,9 @@ async function fetchHkjcOpenMatches(options = {}) {
     windowStart: startTime.toISOString(),
     windowEnd: endTime.toISOString(),
     hours,
-    matches: [...matchesById.values()]
-      .map((match) => hkjcOpenRecord(match, poolKeys))
+    matches: catalogMatches
+      .filter((match) => isWithinWindow(match, startTime, endTime))
+      .map((match) => hkjcCatalogOpenRecord(match, poolKeys))
       .filter((match) => match.pools.length),
     errors,
   };
@@ -1461,6 +1543,8 @@ module.exports = {
     HKJC_MATCH_QUERY,
     compareTitanMatchToHkjc,
     fetchHkjcOpenMatches,
+    hkjcCatalogOpenRecord,
+    isRetryableHkjcError,
     isWithinWindowOrInplay,
     normalizeTeamName,
     parseCorrectScore,

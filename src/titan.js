@@ -1,5 +1,6 @@
 const http = require("node:http");
 const https = require("node:https");
+const dns = require("node:dns").promises;
 const { execFile } = require("node:child_process");
 const { TextDecoder } = require("node:util");
 
@@ -11,6 +12,8 @@ const DEFAULT_REFERER = "https://live.titan007.com/indexall_big.aspx";
 const MOBILE_USER_AGENT =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) " +
   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+const TITAN_VIP_DNS_CACHE_MS = 10 * 60 * 1000;
+const titanVipDnsCache = new Map();
 
 const DEFAULT_ALLOWED_LEAGUES = [
   "英超",
@@ -30,7 +33,10 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "蘇超",
   "葡超",
   "荷甲",
+  "荷乙",
+  "荷女甲",
   "俄超",
+  "奧甲",
   "瑞士超",
   "芬超",
   "挪超",
@@ -41,6 +47,7 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "美職業",
   "墨西聯",
   "墨西聯秋",
+  "墨西甲",
   "阿甲",
   "巴西甲",
   "巴西乙",
@@ -75,6 +82,7 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "西班牙國王盃",
   "意大利盃",
   "德國盃",
+  "德超盃",
   "法國盃",
   "日聯盃",
   "天皇盃",
@@ -88,8 +96,10 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "澳維超",
   "世界盃及外圍賽",
   "國際賽",
+  "東南錦",
   "沙地聯",
   "阿聯酋聯",
+  "卡塔爾聯",
   "卡塔爾王子盃",
   "歐冠盃",
   "烏拉甲",
@@ -98,12 +108,23 @@ const DEFAULT_ALLOWED_LEAGUES = [
 const LEAGUE_ALIASES = {
   "世界盃及外圍賽": ["世界盃外圍賽", "世界杯外圍賽", "世界盃", "世界杯", "世盃", "世杯", "世盃外", "世杯外"],
   "國際賽": ["國際友誼", "国际友谊", "國際友誼賽", "国际友谊赛", "國際賽", "国际赛", "國際友賽", "国际友赛"],
+  "東南錦": ["东南锦", "東南亞錦標賽", "东南亚锦标赛", "東盟錦標賽", "东盟锦标赛", "ASEAN Championship"],
   "世界冠軍球會盃": ["世界冠軍俱樂部盃", "世界冠軍俱樂部杯", "世俱盃", "世俱杯"],
   "美冠聯": ["美冠联", "美國冠軍聯賽", "美国冠军联赛", "美國足球冠軍聯賽", "USL Championship", "USL冠軍聯賽"],
   "美冠盃": ["美冠杯", "中北美冠軍盃", "中北美冠軍杯", "中北美洲冠軍盃", "中北美洲冠軍杯", "CONCACAF Champions Cup"],
   "美職業": ["美職聯", "美國職業大聯盟", "美職業聯賽"],
   "墨西聯": ["墨西联", "墨西哥聯賽", "墨西哥联赛", "墨西哥聯", "墨西哥联", "墨超"],
   "墨西聯秋": ["墨西联秋", "墨西哥超級聯賽", "墨西哥超级联赛", "墨西哥秋季聯賽", "墨西哥秋季联赛", "墨西哥超", "Liga MX Apertura"],
+  "墨西甲": [
+    "墨西甲春",
+    "墨西甲秋",
+    "墨西哥甲組聯賽",
+    "墨西哥甲组联赛",
+    "墨西哥乙級聯賽",
+    "墨西哥乙级联赛",
+    "Liga de Expansion MX",
+    "Liga de Expansión MX",
+  ],
   "墨西聯春": ["墨西聯", "墨西联", "墨西哥聯春"],
   "丹麥超": ["丹麦超", "丹麥超級聯賽", "丹麦超级联赛", "丹麥足球超級聯賽", "丹麦足球超级联赛", "Danish Superliga"],
   "瑞士超": ["瑞士超級聯賽", "瑞士超级联赛", "瑞士足球超級聯賽", "瑞士足球超级联赛", "Swiss Super League"],
@@ -127,6 +148,14 @@ const LEAGUE_ALIASES = {
   "自由盃": ["南美自由盃", "解放者盃"],
   "南美球會盃": ["南美盃", "南美杯", "南美俱樂部盃", "南美俱乐部杯", "南球盃", "南球杯"],
   "阿聯酋聯": ["阿联酋联", "阿聯酋超", "阿联酋超", "阿聯酋職業聯賽", "阿联酋职业联赛", "阿聯酋超級聯賽"],
+  "卡塔爾聯": [
+    "卡塔尔联",
+    "卡塔爾超",
+    "卡塔尔超",
+    "卡塔爾超級聯賽",
+    "卡塔尔超级联赛",
+    "Qatar Stars League",
+  ],
   "卡塔爾王子盃": [
     "卡塔尔王子杯",
     "卡塔爾王子杯",
@@ -183,6 +212,17 @@ const LEAGUE_ALIASES = {
   ],
   "女歐霸盃": ["歐女霸盃", "女子歐霸盃", "歐洲女子歐霸盃"],
   "日女聯": ["日女联", "日本女足聯賽", "日本女足联赛", "日本女子足球聯賽", "日本女子足球联赛"],
+  "荷乙": ["荷蘭乙組聯賽", "荷兰乙组联赛", "荷蘭乙級聯賽", "荷兰乙级联赛", "Eerste Divisie"],
+  "荷女甲": [
+    "荷女",
+    "荷蘭女子甲組聯賽",
+    "荷兰女子甲组联赛",
+    "女子荷蘭甲組聯賽",
+    "女子荷兰甲组联赛",
+    "Vrouwen Eredivisie",
+  ],
+  "奧甲": ["奥甲", "奧地利甲組聯賽", "奥地利甲组联赛", "奧地利超級聯賽", "奥地利超级联赛", "Austrian Bundesliga"],
+  "德超盃": ["德超杯", "德國超級盃", "德国超级杯", "德國超級杯", "DFL-Supercup", "German Super Cup"],
   "韓K2": ["韓K2聯", "韓K2联", "韩K2", "韓國K2聯賽", "韩国K2联赛", "K League 2", "K聯賽2"],
   "西女超": ["西班牙女超", "西班牙女子超級聯賽"],
   "瑞女超": ["瑞典女超", "瑞典女子超級聯賽"],
@@ -872,7 +912,11 @@ function fetchTextWithCurl(url, options = {}) {
   const curlTimeoutMs = Number(options.curlTimeoutMs || Math.min(timeoutMs, 18000));
   const referer = options.referer || DEFAULT_REFERER;
   const timeoutSeconds = Math.max(3, Math.ceil(curlTimeoutMs / 1000));
-  const connectTimeoutSeconds = Math.min(10, timeoutSeconds);
+  const requestedConnectTimeout = Number(options.connectTimeoutSeconds);
+  const connectTimeoutSeconds = Math.max(
+    2,
+    Math.min(Number.isFinite(requestedConnectTimeout) ? requestedConnectTimeout : 10, timeoutSeconds)
+  );
   const args = [
     "-sS",
     "-L",
@@ -890,8 +934,16 @@ function fetchTextWithCurl(url, options = {}) {
     "Accept-Language: zh-HK,zh;q=0.9,zh-CN;q=0.8,en;q=0.7",
     "-H",
     "Cache-Control: no-cache",
-    url,
   ];
+  if (options.curlResolve) {
+    args.push("--resolve", String(options.curlResolve));
+  }
+  for (const [name, value] of Object.entries(options.extraHeaders || {})) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      args.push("-H", `${name}: ${value}`);
+    }
+  }
+  args.push(url);
 
   return new Promise((resolve, reject) => {
     execFile(
@@ -932,31 +984,175 @@ function isFetchRecoverable(error) {
   return /timeout|socket|ECONN|EAI_|EACCES|TLS|network/i.test(String(error?.message || error || ""));
 }
 
+function isTitanVipUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return /^(vip\.titan007\.com|ip-dx-\d+\.nowodds\.com)$/i.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isTitanVipTransportError(error) {
+  if (error?.code === "TITAN_VIP_TRANSPORT") return true;
+  const message = String(error?.message || error || "");
+  return /schannel|handshake|ssl\/tls|UNEXPECTED_EOF|EOF occurred|ECONNRESET|socket disconnected before secure TLS|Empty reply from server|Connection timed out|Total timeout while fetching|Timeout while fetching|Could not resolve host/i.test(
+    message
+  );
+}
+
+function titanVipTransportError(url, error) {
+  const original = String(error?.message || error || "");
+  const wrapped = new Error(
+    `Titan007 VIP 主連線及直連備援均失敗；可按「重試有問題場次」再試。` +
+      ` URL: ${url}${original ? ` | ${original}` : ""}`
+  );
+  wrapped.code = "TITAN_VIP_TRANSPORT";
+  return wrapped;
+}
+
+async function resolveTitanVipAddresses(hostname) {
+  const cached = titanVipDnsCache.get(hostname);
+  if (cached && cached.expiresAt > Date.now()) return cached.addresses;
+
+  let addresses = [];
+  try {
+    addresses = await dns.resolve4(hostname);
+  } catch {
+    try {
+      const records = await dns.lookup(hostname, { all: true, family: 4 });
+      addresses = records.map((record) => record.address);
+    } catch {
+      addresses = [];
+    }
+  }
+
+  addresses = [...new Set(addresses.filter((address) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(address)))].slice(0, 3);
+  if (addresses.length) {
+    titanVipDnsCache.set(hostname, {
+      addresses,
+      expiresAt: Date.now() + TITAN_VIP_DNS_CACHE_MS,
+    });
+  }
+  return addresses;
+}
+
+function titanVipResolveEntry(url, address) {
+  const parsed = new URL(url);
+  return `${parsed.hostname}:${parsed.port || "443"}:${address}`;
+}
+
+function titanVipDirectHttpRequest(url, address) {
+  const parsed = new URL(url);
+  const hostHeader = parsed.host;
+  parsed.protocol = "http:";
+  parsed.hostname = address;
+  parsed.port = "";
+  return {
+    url: parsed.toString(),
+    hostHeader,
+  };
+}
+
+async function fetchTitanVipFallback(url, options, initialError) {
+  const parsed = new URL(url);
+  const addresses = await resolveTitanVipAddresses(parsed.hostname);
+  const errors = [String(initialError?.message || initialError || "VIP primary request failed")];
+  const fallbackOptions = {
+    ...options,
+    curlTimeoutMs: Math.min(Number(options.curlTimeoutMs || options.timeoutMs || 12000), 12000),
+    connectTimeoutSeconds: Math.min(Number(options.connectTimeoutSeconds || 6), 6),
+  };
+
+  for (const address of addresses) {
+    try {
+      const response = await fetchTextWithCurl(url, {
+        ...fallbackOptions,
+        curlResolve: titanVipResolveEntry(url, address),
+      });
+      return {
+        ...response,
+        url,
+        transport: "curl-resolved",
+        resolvedAddress: address,
+      };
+    } catch (error) {
+      errors.push(`HTTPS ${address}: ${error.message || String(error)}`);
+    }
+
+    const direct = titanVipDirectHttpRequest(url, address);
+    try {
+      const response = await fetchTextWithCurl(direct.url, {
+        ...fallbackOptions,
+        extraHeaders: {
+          ...(fallbackOptions.extraHeaders || {}),
+          Host: direct.hostHeader,
+        },
+      });
+      return {
+        ...response,
+        url,
+        transport: "curl-direct-http",
+        resolvedAddress: address,
+      };
+    } catch (error) {
+      errors.push(`HTTP ${address}: ${error.message || String(error)}`);
+    }
+  }
+
+  if (!addresses.length) errors.push(`DNS did not return an IPv4 address for ${parsed.hostname}`);
+  throw titanVipTransportError(url, new Error(errors.join(" | ")));
+}
+
+async function fetchUsingSelectedTransport(url, options) {
+  try {
+    return options.preferCurl
+      ? await fetchTextWithCurl(url, options).catch((error) => {
+          if (options.curlOnly) throw error;
+          return fetchText(url, options);
+        })
+      : await fetchText(url, options).catch((error) => {
+          if (options.curlFallback !== false && isFetchRecoverable(error)) {
+            return fetchTextWithCurl(url, options);
+          }
+          throw error;
+        });
+  } catch (error) {
+    if (isTitanVipUrl(url) && isTitanVipTransportError(error)) {
+      return fetchTitanVipFallback(url, options, error);
+    }
+    throw error;
+  }
+}
+
 async function fetchFirstAvailable(urls, options = {}) {
   const errors = [];
   for (const url of urls) {
     const attempts = options.attempts || 2;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        const response = options.preferCurl
-          ? await fetchTextWithCurl(url, options).catch((error) => {
-              if (options.curlOnly) throw error;
-              return fetchText(url, options);
-            })
-          : await fetchText(url, options).catch((error) => {
-              if (options.curlFallback !== false && isFetchRecoverable(error)) {
-                return fetchTextWithCurl(url, options);
-              }
-              throw error;
-            });
+        let response = await fetchUsingSelectedTransport(url, options);
+        if (isTitanVipUrl(url) && response.incomplete) {
+          response = await fetchTitanVipFallback(
+            url,
+            options,
+            new Error(`Incomplete response while fetching ${url}`)
+          );
+        }
         assertUsefulHtml(response.text, url);
         if (options.rejectIncomplete && response.incomplete) {
           throw new Error(`Incomplete response while fetching ${url}`);
         }
         return response;
       } catch (error) {
+        const outputError =
+          error?.code === "TITAN_VIP_TRANSPORT"
+            ? error
+            : isTitanVipUrl(url) && isTitanVipTransportError(error)
+            ? titanVipTransportError(url, error)
+            : error;
         const suffix = attempts > 1 ? ` (attempt ${attempt}/${attempts})` : "";
-        errors.push(`${url}${suffix}: ${error.message}`);
+        errors.push(`${url}${suffix}: ${outputError.message}`);
       }
     }
   }
@@ -1566,6 +1762,7 @@ async function fetchAndParseMarket(url, market, period, options) {
           preferCurl: true,
           curlOnly: true,
           curlTimeoutMs: 18000,
+          connectTimeoutSeconds: 8,
           rejectIncomplete: true,
         },
         {
@@ -1575,6 +1772,7 @@ async function fetchAndParseMarket(url, market, period, options) {
           preferCurl: true,
           curlOnly: true,
           curlTimeoutMs: 35000,
+          connectTimeoutSeconds: 10,
           rejectIncomplete: true,
         },
         {
@@ -1592,7 +1790,8 @@ async function fetchAndParseMarket(url, market, period, options) {
           attempts: 1,
           preferCurl: true,
           curlOnly: true,
-          curlTimeoutMs: 15000,
+          curlTimeoutMs: 12000,
+          connectTimeoutSeconds: 6,
           rejectIncomplete: false,
         },
       ];
@@ -1852,6 +2051,7 @@ async function checkTitanConnection(options = {}) {
         latencyMs: Date.now() - startedAt,
         market: "asianFull",
         sourceUrl: response.url || url,
+        transport: response.transport || "node",
         rowCount: filteredRows.length,
         rawRowCount: rows.length,
         triedMatches: candidates.length,
@@ -2538,6 +2738,7 @@ module.exports = {
     assertUsefulHtml,
     buildAllowedLeagueSet,
     expectedBookmakerKeysForMarket,
+    fetchTitanVipFallback,
     latestEuropeRows,
     headToHeadOverUnderStats,
     normalizeComparableText,
@@ -2549,6 +2750,8 @@ module.exports = {
     parseProbabilityEventsFromJson,
     probabilityTextLines,
     recordMatchesAllowedLeagues,
+    titanVipDirectHttpRequest,
+    titanVipResolveEntry,
     titanProbabilityUrl,
   },
 };

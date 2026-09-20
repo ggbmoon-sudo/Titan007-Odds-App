@@ -38,8 +38,14 @@ function classifyProbeResult(input) {
 
   if (input.error) {
     state = "error";
-    diagnosis = /timeout/i.test(input.error) ? "連線逾時" : "網絡或路由錯誤";
-    hints.push("檢查 VPN / 代理 / DNS / 目標網站是否阻擋目前 IP。");
+    if (/schannel|handshake|ssl\/tls|UNEXPECTED_EOF|before secure TLS|ECONNRESET|Empty reply|Connection timed out/i.test(input.error)) {
+      diagnosis = "Titan007 VIP TLS 握手被斷";
+      hints.push("App 會自動嘗試 Titan VIP 的固定解析及直連備援。");
+      hints.push("如主連線與備援都失敗，稍後按「重試有問題場次」。");
+    } else {
+      diagnosis = /timeout/i.test(input.error) ? "連線逾時" : "網絡或路由錯誤";
+      hints.push("檢查 VPN / 代理 / DNS / 目標網站是否阻擋目前 IP。");
+    }
   } else if (statusCode === 403) {
     state = "error";
     diagnosis = "HTTP 403，疑似 IP / 地區 / WAF 風控";

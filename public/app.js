@@ -10,6 +10,8 @@ const state = {
   features: null,
   loadedMatches: [],
   loadedMatchesById: new Map(),
+  loadedMatchesSavedAt: "",
+  selectedMatchIds: new Set(),
   hkjcMatchCheck: null,
   hkjcMatchCheckPromise: null,
   hkjcMatchCheckRunId: 0,
@@ -37,6 +39,7 @@ const EXTRACTION_WORKER_COUNT_STORAGE_KEY = "odds-workbench.worker-count";
 const PROBABILITY_WINDOW_STORAGE_KEY = "odds-workbench.probability-window";
 const AI_HISTORY_STORAGE_KEY = "odds-workbench.ai-history";
 const BACKTEST_STORAGE_KEY = "odds-workbench.backtest-records";
+const LOADED_MATCHES_STORAGE_KEY = "odds-workbench.loaded-matches-v1";
 const MAX_HISTORY_ITEMS = 25;
 const MAX_BACKTEST_RECORDS = 100;
 const MAX_AI_ROWS = 800;
@@ -110,11 +113,15 @@ const els = {
   extractHkjcTwelveHourBtn: document.getElementById("extractHkjcTwelveHourBtn"),
   extractHkjcEighteenHourBtn: document.getElementById("extractHkjcEighteenHourBtn"),
   matchList: document.getElementById("matchList"),
+  matchSearchInput: document.getElementById("matchSearchInput"),
+  matchStatusFilter: document.getElementById("matchStatusFilter"),
+  matchHkjcFilter: document.getElementById("matchHkjcFilter"),
+  matchCountLabel: document.getElementById("matchCountLabel"),
+  matchLastUpdated: document.getElementById("matchLastUpdated"),
   matchIdInput: document.getElementById("matchIdInput"),
   includeMultiInput: document.getElementById("includeMultiInput"),
   extractBtn: document.getElementById("extractBtn"),
   batchExtractBtn: document.getElementById("batchExtractBtn"),
-  hkjcSpecialOddsBtn: document.getElementById("hkjcSpecialOddsBtn"),
   hkjcCrsEqualOddsBtn: document.getElementById("hkjcCrsEqualOddsBtn"),
   networkDiagnosticsBtn: document.getElementById("networkDiagnosticsBtn"),
   hkjcScanBtn: document.getElementById("hkjcScanBtn"),
@@ -191,39 +198,6 @@ function arrangeControlPanel() {
   if (firstSection && els.matchList) {
     firstSection.insertAdjacentElement("afterend", els.matchList);
   }
-
-  let debugDock = document.getElementById("debugDock");
-  if (!debugDock) {
-    debugDock = document.createElement("section");
-    debugDock.id = "debugDock";
-    debugDock.className = "tool-section debug-dock";
-    debugDock.innerHTML = `
-      <div class="section-heading">
-        <span>05</span>
-        <h2>除錯燈</h2>
-      </div>
-    `;
-    panel.appendChild(debugDock);
-  }
-
-  const aiDebugLights = document.getElementById("debugLights");
-  const contextDebugLights = els.debugContextLight?.closest(".debug-lights");
-  for (const block of [aiDebugLights, contextDebugLights]) {
-    if (block && block.parentElement !== debugDock) {
-      debugDock.appendChild(block);
-    }
-  }
-}
-
-function ensureHkjcSpecialOddsButton() {
-  if (els.hkjcSpecialOddsBtn || !els.hkjcScanBtn?.parentElement) return;
-  const button = document.createElement("button");
-  button.id = "hkjcSpecialOddsBtn";
-  button.className = "primary";
-  button.type = "button";
-  button.textContent = "HKJC 指定賠率掃描";
-  els.hkjcScanBtn.parentElement.insertBefore(button, els.hkjcScanBtn);
-  els.hkjcSpecialOddsBtn = button;
 }
 
 function ensureHkjcCrsEqualOddsButton() {
@@ -233,7 +207,7 @@ function ensureHkjcCrsEqualOddsButton() {
   button.className = "primary";
   button.type = "button";
   button.textContent = "HKJC 波膽同賠率";
-  const anchor = els.hkjcSpecialOddsBtn || els.hkjcScanBtn;
+  const anchor = els.hkjcScanBtn;
   if (anchor.nextSibling) {
     anchor.parentElement.insertBefore(button, anchor.nextSibling);
   } else {
@@ -249,7 +223,7 @@ function ensureNetworkDiagnosticsButton() {
   button.className = "wide-action";
   button.type = "button";
   button.textContent = "連線診斷";
-  const anchor = els.hkjcCrsEqualOddsBtn || els.hkjcSpecialOddsBtn || els.hkjcScanBtn;
+  const anchor = els.hkjcCrsEqualOddsBtn || els.hkjcScanBtn;
   if (anchor.nextSibling) {
     anchor.parentElement.insertBefore(button, anchor.nextSibling);
   } else {
@@ -290,7 +264,6 @@ function ensureTitanGuessButton() {
 arrangeControlPanel();
 ensureFourHourButton();
 ensureTitanGuessButton();
-ensureHkjcSpecialOddsButton();
 ensureHkjcCrsEqualOddsButton();
 ensureNetworkDiagnosticsButton();
 
@@ -968,10 +941,8 @@ function hkjcCheckEligibleForExtraction(check) {
 }
 
 function selectOnlyMatches(matches) {
-  const ids = new Set(matches.map((match) => String(match.matchId)));
-  for (const input of els.matchList.querySelectorAll(".match-check")) {
-    input.checked = ids.has(String(input.value));
-  }
+  state.selectedMatchIds = new Set(matches.map((match) => String(match.matchId)));
+  renderVisibleMatchList();
   updateSelectedButton();
 }
 
@@ -1356,6 +1327,49 @@ function activeSectionEntries(tab) {
   return { entries, errors, warnings };
 }
 
+function saveLoadedMatches(matches, savedAt = new Date().toISOString()) {
+  const storedMatches = (Array.isArray(matches) ? matches : []).filter((match) => match?.matchId);
+  if (!storedMatches.length) return false;
+  const saved = saveJsonStorage(LOADED_MATCHES_STORAGE_KEY, {
+    version: 1,
+    savedAt,
+    matches: storedMatches,
+  });
+  if (saved) {
+    state.loadedMatchesSavedAt = savedAt;
+    updateMatchLastUpdated();
+  }
+  return saved;
+}
+
+function updateMatchLastUpdated() {
+  if (!els.matchLastUpdated) return;
+  const savedTime = state.loadedMatchesSavedAt ? new Date(state.loadedMatchesSavedAt) : null;
+  if (!savedTime || !Number.isFinite(savedTime.getTime())) {
+    els.matchLastUpdated.textContent = "清單會保存在本機，下次開啟毋須重新載入";
+    return;
+  }
+  const label = savedTime.toLocaleString("zh-HK", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  els.matchLastUpdated.textContent = `已保存 ${state.loadedMatches.length} 場 · 更新於 ${label}`;
+}
+
+function restoreLoadedMatches() {
+  const stored = loadJsonStorage(LOADED_MATCHES_STORAGE_KEY, null);
+  const matches = Array.isArray(stored?.matches) ? stored.matches.filter((match) => match?.matchId) : [];
+  if (!matches.length) return false;
+
+  state.loadedMatchesSavedAt = stored.savedAt || "";
+  renderMatchList(matches, { persist: false });
+  updateMatchLastUpdated();
+  setStatus(`已還原 ${matches.length} 場`);
+  return true;
+}
+
 function titanMarketSections(data) {
   if (!data) return [];
   return [
@@ -1412,6 +1426,9 @@ function summarizeTechnicalError(error) {
   const urlHint = urls[0] ? ` (${urls[0]})` : "";
   const http = text.match(/\bHTTP\s+\d{3}\b/i)?.[0];
   if (/AI HTTP 554/i.test(text)) return `AI HTTP 554：中轉/上游逾時或請求過大，已加入自動重試；如仍失敗請用新四莊家資料重新提取後再分析${urlHint}`;
+  if (/Titan007 VIP (?:TLS\/路由失敗|主連線及直連備援)|TITAN_VIP_TRANSPORT|schannel|ssl\/tls|handshake|UNEXPECTED_EOF|before secure TLS|Connection timed out/i.test(text)) {
+    return `Titan007 VIP 主連線及直連備援都失敗，請稍後按重試${urlHint}`;
+  }
   if (/timed out|timeout|逾時/i.test(text)) return `${http || "請求逾時"}${urlHint}`;
   if (/socket hang up|ECONNRESET|connection reset/i.test(text)) return `連線中斷${urlHint}`;
   if (/error page|returned an error/i.test(text)) return `Titan007 回傳錯誤頁${urlHint}`;
@@ -1942,15 +1959,15 @@ function guessLeanLabel(match, market) {
 }
 
 function setMatchButtons(enabled) {
-  els.selectAllBtn.disabled = !enabled || state.working;
-  els.clearSelectionBtn.disabled = !enabled || state.working;
+  const hasVisibleMatches = visibleLoadedMatches().length > 0;
+  els.selectAllBtn.disabled = !enabled || !hasVisibleMatches || state.working;
+  els.clearSelectionBtn.disabled = !enabled || state.selectedMatchIds.size === 0 || state.working;
   els.extractLoadedBtn.disabled = !enabled || state.working;
   els.probabilityScanBtn.disabled = state.working;
   if (els.h2hOuScanBtn) els.h2hOuScanBtn.disabled = state.working;
   if (els.titanGuessScanBtn) els.titanGuessScanBtn.disabled = state.working;
   if (els.selectFourHourBtn) els.selectFourHourBtn.disabled = state.working;
   if (els.extractFourHourBtn) els.extractFourHourBtn.disabled = state.working;
-  if (els.hkjcSpecialOddsBtn) els.hkjcSpecialOddsBtn.disabled = state.working;
   if (els.hkjcCrsEqualOddsBtn) els.hkjcCrsEqualOddsBtn.disabled = state.working;
   if (els.networkDiagnosticsBtn) els.networkDiagnosticsBtn.disabled = state.working;
   if (els.extractHkjcSixHourBtn) els.extractHkjcSixHourBtn.disabled = state.working;
@@ -1960,14 +1977,56 @@ function setMatchButtons(enabled) {
 }
 
 function selectedMatches() {
-  const ids = [...els.matchList.querySelectorAll(".match-check:checked")].map((input) => input.value);
-  return ids.map(matchById);
+  return [...state.selectedMatchIds]
+    .map((id) => state.loadedMatchesById.get(String(id)))
+    .filter(Boolean);
 }
 
 function updateSelectedButton() {
   const count = selectedMatches().length;
   els.extractSelectedBtn.disabled = state.working || count === 0;
   els.extractSelectedBtn.textContent = count ? `提取已選 (${count})` : "提取已選";
+  els.clearSelectionBtn.disabled = state.working || count === 0;
+  els.extractLoadedBtn.textContent = state.loadedMatches.length
+    ? `提取全部 ${state.loadedMatches.length} 場`
+    : "提取全部已載入賽事";
+}
+
+function matchLifecycleStatus(match) {
+  const code = String(match?.stateCode ?? "").trim();
+  const label = String(match?.state || "").trim().toLowerCase();
+  if (code === "0" || isNotStartedMatch(match)) return "upcoming";
+  if (/完|完場|结束|結束|finished|full.?time|ft|取消|腰斬|腰斩|延期|postponed|cancel/.test(label)) {
+    return "finished";
+  }
+  return "live";
+}
+
+function visibleLoadedMatches() {
+  const query = String(els.matchSearchInput?.value || "").trim().toLowerCase();
+  const statusFilter = els.matchStatusFilter?.value || "all";
+  const hkjcFilter = els.matchHkjcFilter?.value || "all";
+  return state.loadedMatches.filter((match) => {
+    if (statusFilter !== "all" && matchLifecycleStatus(match) !== statusFilter) return false;
+    if (hkjcFilter !== "all" && match.hkjcCheck?.status !== hkjcFilter) return false;
+    if (!query) return true;
+    const haystack = [
+      match.matchId,
+      match.league,
+      match.leagueSimplified,
+      match.leagueTraditional,
+      match.home,
+      match.homeSimplified,
+      match.homeTraditional,
+      match.away,
+      match.awaySimplified,
+      match.awayTraditional,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  });
 }
 
 function hkjcMatchBadge(match) {
@@ -1980,20 +2039,16 @@ function hkjcMatchBadge(match) {
     ? `${check.matched.tournament || ""} ${check.matched.home || ""} vs ${check.matched.away || ""} ${check.matched.kickOffTime || ""}`
     : check.error || "";
   const pools = check.matched?.poolTypes?.length ? ` · ${check.matched.poolTypes.join("/")}` : "";
-  const score = check.score ? ` ${check.score}%` : "";
-  const label =
-    check.label ||
-    (check.status === "open"
-      ? "HKJC 已開"
-      : check.status === "possible"
-        ? "HKJC 疑似"
-        : check.status === "pending"
-          ? "HKJC 待查"
-        : check.status === "timeout"
-          ? "HKJC 逾時"
-          : check.status === "error"
-            ? "HKJC 失敗"
-            : "HKJC 未見");
+  const score = ["open", "possible"].includes(check.status) && check.score ? ` · 配對 ${check.score}%` : "";
+  const labels = {
+    open: "HKJC 已開盤",
+    possible: "HKJC 可能配對",
+    pending: "HKJC 對照中",
+    timeout: "HKJC 對照逾時",
+    error: "HKJC 對照失敗",
+    not_found: "HKJC 未配對",
+  };
+  const label = labels[check.status] || check.label || "HKJC 未配對";
   return `<span class="hkjc-match-badge ${escapeHtml(check.status || "checking")}" title="${escapeHtml(title)}">${escapeHtml(label)}${escapeHtml(score)}${escapeHtml(pools)}</span>`;
 }
 
@@ -2001,7 +2056,6 @@ function setWorking(isWorking) {
   state.working = isWorking;
   els.extractBtn.disabled = isWorking;
   els.batchExtractBtn.disabled = isWorking;
-  if (els.hkjcSpecialOddsBtn) els.hkjcSpecialOddsBtn.disabled = isWorking;
   if (els.hkjcCrsEqualOddsBtn) els.hkjcCrsEqualOddsBtn.disabled = isWorking;
   if (els.networkDiagnosticsBtn) els.networkDiagnosticsBtn.disabled = isWorking;
   els.hkjcScanBtn.disabled = isWorking;
@@ -2025,6 +2079,7 @@ function setWorking(isWorking) {
   els.clearSelectionBtn.disabled = isWorking || !state.loadedMatches.length;
   els.extractLoadedBtn.disabled = isWorking || !state.loadedMatches.length;
   els.extractSelectedBtn.disabled = isWorking || selectedMatches().length === 0;
+  updateSelectedButton();
   updateAnalysisButton();
 }
 
@@ -2120,38 +2175,65 @@ function setExportButtons(enabled) {
   updateAnalysisButton();
 }
 
-function renderMatchList(matches, options = {}) {
-  const selected = options.preserveSelection
-    ? new Set([...els.matchList.querySelectorAll(".match-check:checked")].map((input) => input.value))
-    : new Set();
-  state.loadedMatches = matches;
-  state.loadedMatchesById = new Map(matches.map((match) => [String(match.matchId), match]));
+function renderVisibleMatchList() {
+  const matches = visibleLoadedMatches();
+  if (els.matchCountLabel) {
+    els.matchCountLabel.textContent = matches.length === state.loadedMatches.length
+      ? `${state.loadedMatches.length} 場`
+      : `顯示 ${matches.length}／${state.loadedMatches.length} 場`;
+  }
 
-  if (!matches.length) {
-    els.matchList.innerHTML = `<div class="empty">沒有符合條件的賽事</div>`;
+  if (!state.loadedMatches.length) {
+    els.matchList.innerHTML = `<div class="empty">尚未載入賽事</div>`;
     setMatchButtons(false);
     return;
   }
 
+  if (!matches.length) {
+    els.matchList.innerHTML = `<div class="empty filter-empty">沒有符合目前篩選的賽事<br><button class="clear-match-filters" type="button">清除篩選</button></div>`;
+    setMatchButtons(true);
+    return;
+  }
+
   els.matchList.innerHTML = matches
-    .map(
-      (match) => `
+    .map((match) => {
+      const lifecycle = matchLifecycleStatus(match);
+      const lifecycleLabel = lifecycle === "upcoming" ? "未開賽" : lifecycle === "live" ? "進行中" : "已完場";
+      return `
         <div class="match-row" data-id="${escapeHtml(match.matchId)}">
           <label class="match-select">
-            <input class="match-check" type="checkbox" value="${escapeHtml(match.matchId)}" ${selected.has(String(match.matchId)) ? "checked" : ""}>
+            <input class="match-check" type="checkbox" value="${escapeHtml(match.matchId)}" ${state.selectedMatchIds.has(String(match.matchId)) ? "checked" : ""}>
             <span>
-              <strong>${escapeHtml(match.league)} · ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</strong>
-              ${escapeHtml(match.kickoffTime)} · ${escapeHtml(match.state)} · ${escapeHtml(match.score)}
+              <span class="match-row-topline">
+                <strong>${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</strong>
+                <span class="match-status-badge ${escapeHtml(lifecycle)}">${lifecycleLabel}</span>
+              </span>
+              <span class="match-meta">${escapeHtml(match.league)} · ${escapeHtml(match.kickoffTime)} · ID ${escapeHtml(match.matchId)}${match.score ? ` · ${escapeHtml(match.score)}` : ""}</span>
               ${hkjcMatchBadge(match)}
             </span>
           </label>
-          <button class="quick-extract" type="button" data-id="${escapeHtml(match.matchId)}">提取</button>
-          <code>${escapeHtml(match.matchId)}</code>
+          <button class="quick-extract" type="button" data-id="${escapeHtml(match.matchId)}">只提取此場</button>
         </div>
-      `
-    )
+      `;
+    })
     .join("");
   setMatchButtons(true);
+}
+
+function renderMatchList(matches, options = {}) {
+  const selected = options.preserveSelection ? new Set(state.selectedMatchIds) : new Set();
+  state.loadedMatches = matches;
+  state.loadedMatchesById = new Map(matches.map((match) => [String(match.matchId), match]));
+  state.selectedMatchIds = new Set([...selected].filter((id) => state.loadedMatchesById.has(String(id))));
+  if (options.persist !== false && matches.length) {
+    saveLoadedMatches(matches);
+  }
+
+  if (!matches.length) {
+    state.selectedMatchIds.clear();
+  }
+  renderVisibleMatchList();
+  updateMatchLastUpdated();
 }
 
 async function checkLoadedMatchesInHkjc(matches, options = {}) {
@@ -2205,7 +2287,11 @@ async function checkLoadedMatchesInHkjc(matches, options = {}) {
     renderMatchList(updatedMatches, { preserveSelection: true });
     const open = body.data.openCount || 0;
     const possible = body.data.possibleCount || 0;
-    setStatus(open || possible ? `HKJC 已對照 ${open}+${possible}` : "完成");
+    setStatus(
+      open || possible
+        ? `HKJC 對照完成 · ${open} 場已開盤 · ${possible} 場可能配對`
+        : "HKJC 對照完成 · 未有開盤"
+    );
     return updatedMatches;
   } catch (error) {
     if (runId !== state.hkjcMatchCheckRunId) return state.loadedMatches;
@@ -2265,7 +2351,9 @@ function markHkjcCheckTimedOut(runId, message = "HKJC 檢查逾時，請稍後�
 }
 
 async function loadMatches(options = {}) {
-  setStatus("載入中");
+  const previousMatches = [...state.loadedMatches];
+  const previousSavedAt = state.loadedMatchesSavedAt;
+  setStatus("正在更新賽事清單…");
   clearHkjcCheckTimer();
   state.hkjcMatchCheckRunId += 1;
   els.matchList.innerHTML = `<div class="empty">載入賽事中...</div>`;
@@ -2296,7 +2384,7 @@ async function loadMatches(options = {}) {
         `<div class="match-note">沒有找到「${escapeHtml(fallbackLeague)}」，已改為顯示全部目標聯賽。</div>`
       );
     }
-    setStatus("對照 HKJC 中");
+    setStatus(matches.length ? `已載入 ${matches.length} 場 · 正在對照 HKJC…` : "沒有符合條件的賽事");
     if (!options.skipHkjcAutoCheck) {
       const runId = state.hkjcMatchCheckRunId;
       const timeoutMs = options.hkjcTimeoutMs || HKJC_MATCH_CHECK_TIMEOUT_MS;
@@ -2322,13 +2410,24 @@ async function loadMatches(options = {}) {
     }
     return matches;
   } catch (error) {
-    state.loadedMatches = [];
-    state.loadedMatchesById = new Map();
     state.hkjcMatchCheck = null;
     state.hkjcMatchCheckPromise = null;
     clearHkjcCheckTimer();
-    els.matchList.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
-    setStatus("錯誤");
+    if (previousMatches.length) {
+      state.loadedMatchesSavedAt = previousSavedAt;
+      renderMatchList(previousMatches, { persist: false, preserveSelection: true });
+      els.matchList.insertAdjacentHTML(
+        "afterbegin",
+        `<div class="match-note">更新失敗，已保留上次清單：${escapeHtml(summarizeTechnicalError(error))}</div>`
+      );
+      setStatus("更新失敗 · 已保留上次清單");
+    } else {
+      state.loadedMatches = [];
+      state.loadedMatchesById = new Map();
+      state.selectedMatchIds.clear();
+      els.matchList.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+      setStatus("賽事清單更新失敗");
+    }
     if (options.rethrow) throw error;
     return [];
   }
@@ -2342,7 +2441,8 @@ async function extract() {
   }
   const matchId = ids[0];
 
-  setStatus("提取中");
+  const startedAt = Date.now();
+  setStatus(`正在提取 ${matchId}…`);
   setWorking(true);
   setExportButtons(false);
   clearAnalysis();
@@ -2361,7 +2461,8 @@ async function extract() {
     updateSummary();
     renderActiveTab();
     setExportButtons(true);
-    setStatus("完成");
+    const rowCount = currentAnalysisRows().length;
+    setStatus(`已完成 ${matchId} · ${rowCount} 筆 · ${formatDuration(Date.now() - startedAt)}`);
     loadLocalTitanCache({ silent: true });
   } catch (error) {
     state.data = null;
@@ -3284,7 +3385,7 @@ async function scanHeadToHeadOverUnder() {
 }
 
 async function scanHkjc() {
-  setStatus("掃描中");
+  setStatus("正在掃描 HKJC 指定賠率…");
   setWorking(true);
   setExportButtons(false);
   clearAnalysis();
@@ -3300,14 +3401,14 @@ async function scanHkjc() {
     updateSummary();
     renderHkjcTable();
     setExportButtons(true);
-    setStatus("完成");
+    setStatus(`HKJC 掃描完成 · ${state.hkjc.hitCount || 0} 筆命中`);
   } catch (error) {
     state.hkjc = null;
     state.probability = null;
     state.titanGuess = null;
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
-    setStatus("錯誤");
+    setStatus("HKJC 掃描失敗");
   } finally {
     setWorking(false);
     updateSelectedButton();
@@ -3340,38 +3441,6 @@ async function scanTitanGuess() {
     updateSummary();
     els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     setStatus("V猜球錯誤");
-  } finally {
-    setWorking(false);
-    updateSelectedButton();
-  }
-}
-
-async function scanHkjcSpecialOdds() {
-  const label = "HKJC 指定賠率";
-  setStatus(`${label}掃描中`);
-  setWorking(true);
-  setExportButtons(false);
-  clearAnalysis();
-  els.tableWrap.innerHTML = `<div class="empty">正在掃描未來 24 小時 HKJC 指定賠率...</div>`;
-
-  try {
-    const body = await getJson("/api/hkjc-special-odds-scan?hours=24");
-    state.hkjc = body.data;
-    state.data = null;
-    state.batch = null;
-    state.probability = null;
-    state.titanGuess = null;
-    updateSummary();
-    renderHkjcTable();
-    setExportButtons(true);
-    setStatus("完成");
-  } catch (error) {
-    state.hkjc = null;
-    state.probability = null;
-    state.titanGuess = null;
-    updateSummary();
-    els.tableWrap.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
-    setStatus("錯誤");
   } finally {
     setWorking(false);
     updateSelectedButton();
@@ -5562,7 +5631,6 @@ els.extractHkjcTwelveHourBtn?.addEventListener("click", extractHkjcTwelveHourOpe
 els.extractHkjcEighteenHourBtn?.addEventListener("click", extractHkjcEighteenHourOpen);
 els.extractBtn.addEventListener("click", extract);
 els.batchExtractBtn.addEventListener("click", extractBatchFromInput);
-els.hkjcSpecialOddsBtn?.addEventListener("click", scanHkjcSpecialOdds);
 els.hkjcCrsEqualOddsBtn?.addEventListener("click", scanHkjcCrsEqualOdds);
 els.networkDiagnosticsBtn?.addEventListener("click", runNetworkDiagnostics);
 els.hkjcScanBtn.addEventListener("click", scanHkjc);
@@ -5639,6 +5707,12 @@ els.includeWeatherInput.addEventListener("change", updateDebugLights);
 els.includeMultiInput?.addEventListener("change", saveExtractionOptions);
 els.workerCountInput?.addEventListener("change", saveExtractionOptions);
 els.probabilityWindowInput?.addEventListener("change", saveExtractionOptions);
+els.quickLimitInput?.addEventListener("input", () => {
+  els.quickExtractBtn.textContent = `提取最近 ${quickLimit()} 場`;
+});
+els.matchSearchInput?.addEventListener("input", renderVisibleMatchList);
+els.matchStatusFilter?.addEventListener("change", renderVisibleMatchList);
+els.matchHkjcFilter?.addEventListener("change", renderVisibleMatchList);
 
 els.matchIdInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -5668,6 +5742,14 @@ els.aiTargetMatchSelect?.addEventListener("change", () => {
 });
 
 els.matchList.addEventListener("click", (event) => {
+  const clearFiltersButton = event.target.closest(".clear-match-filters");
+  if (clearFiltersButton) {
+    if (els.matchSearchInput) els.matchSearchInput.value = "";
+    if (els.matchStatusFilter) els.matchStatusFilter.value = "all";
+    if (els.matchHkjcFilter) els.matchHkjcFilter.value = "all";
+    renderVisibleMatchList();
+    return;
+  }
   const quickButton = event.target.closest(".quick-extract");
   if (!quickButton) return;
   els.matchIdInput.value = quickButton.dataset.id;
@@ -5676,6 +5758,9 @@ els.matchList.addEventListener("click", (event) => {
 
 els.matchList.addEventListener("change", (event) => {
   if (!event.target.matches(".match-check")) return;
+  const id = String(event.target.value);
+  if (event.target.checked) state.selectedMatchIds.add(id);
+  else state.selectedMatchIds.delete(id);
   updateSelectedButton();
 });
 
@@ -5758,16 +5843,14 @@ els.clearBacktestBtn.addEventListener("click", () => {
 });
 
 els.selectAllBtn.addEventListener("click", () => {
-  for (const input of els.matchList.querySelectorAll(".match-check")) {
-    input.checked = true;
-  }
+  for (const match of visibleLoadedMatches()) state.selectedMatchIds.add(String(match.matchId));
+  renderVisibleMatchList();
   updateSelectedButton();
 });
 
 els.clearSelectionBtn.addEventListener("click", () => {
-  for (const input of els.matchList.querySelectorAll(".match-check")) {
-    input.checked = false;
-  }
+  state.selectedMatchIds.clear();
+  renderVisibleMatchList();
   updateSelectedButton();
 });
 
@@ -5776,6 +5859,13 @@ els.extractSelectedBtn.addEventListener("click", () => {
 });
 
 els.extractLoadedBtn.addEventListener("click", () => {
+  if (state.loadedMatches.length > 25) {
+    const concurrency = workerCount();
+    const confirmed = window.confirm(
+      `將會提取全部 ${state.loadedMatches.length} 場（${concurrency} 個並行），可能需要較長時間。確定繼續？`
+    );
+    if (!confirmed) return;
+  }
   extractBatch(state.loadedMatches);
 });
 
@@ -5889,6 +5979,7 @@ loadLocalAppState();
 loadExtractionOptions();
 loadStoredApiKey();
 loadStoredApiFootballKey();
+restoreLoadedMatches();
 if (els.promptVersionLabel) {
   els.promptVersionLabel.textContent = AI_PROMPT_VERSION;
 }

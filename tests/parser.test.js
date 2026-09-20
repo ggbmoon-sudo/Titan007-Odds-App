@@ -89,6 +89,26 @@ test("network diagnostics classifier flags common IP blocks and rate limits", ()
     text: "<html>captcha required</html>",
   });
   assert.equal(softBlock.state, "warn");
+
+  const vipTls = diagnosticInternals.classifyProbeResult({
+    name: "titan_vip_asian",
+    error: "schannel: failed to receive handshake, SSL/TLS connection failed",
+  });
+  assert.equal(vipTls.state, "error");
+  assert.match(vipTls.diagnosis, /TLS|握手/);
+  assert.match(vipTls.hints.join(" "), /備援|重試/);
+});
+
+test("Titan VIP transport fallback preserves host and match URL", () => {
+  const url = "https://vip.titan007.com/AsianOdds_n.aspx?id=3013643&t=0&l=1";
+  assert.equal(
+    titanInternals.titanVipResolveEntry(url, "61.143.225.88"),
+    "vip.titan007.com:443:61.143.225.88"
+  );
+  assert.deepEqual(titanInternals.titanVipDirectHttpRequest(url, "61.143.225.88"), {
+    url: "http://61.143.225.88/AsianOdds_n.aspx?id=3013643&t=0&l=1",
+    hostHeader: "vip.titan007.com",
+  });
 });
 
 test("Titan V guess homepage parser reads support percentages", () => {
@@ -767,6 +787,31 @@ test("parseLiveMatches includes Liga MX Apertura, Danish Superliga, and Swiss Su
   assert.deepEqual(
     swissSearch.map((match) => match.matchId),
     ["2605", "2606"]
+  );
+});
+
+test("parseLiveMatches includes newly added HKJC competitions", () => {
+  const script = `
+    var A=Array(14);
+    A[1]="2701^#5ca39a^東南錦^東南錦^^主隊A^主隊A^^客隊A^客隊A^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[2]="2702^#5ca39a^東南亞錦標賽^東南亞錦標賽^^主隊B^主隊B^^客隊B^客隊B^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[3]="2703^#5ca39a^卡塔爾聯^卡塔爾聯^^主隊C^主隊C^^客隊C^客隊C^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[4]="2704^#5ca39a^卡塔爾超級聯賽^卡塔爾超級聯賽^^主隊D^主隊D^^客隊D^客隊D^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[5]="2705^#5ca39a^荷乙^荷乙^^主隊E^主隊E^^客隊E^客隊E^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[6]="2706^#5ca39a^荷蘭乙組聯賽^荷蘭乙組聯賽^^主隊F^主隊F^^客隊F^客隊F^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[7]="2707^#5ca39a^奧甲^奧甲^^主隊G^主隊G^^客隊G^客隊G^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[8]="2708^#5ca39a^奧地利甲組聯賽^奧地利甲組聯賽^^主隊H^主隊H^^客隊H^客隊H^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[9]="2709^#5ca39a^德超盃^德超盃^^主隊I^主隊I^^客隊I^客隊I^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[10]="2710^#5ca39a^德國超級盃^德國超級盃^^主隊J^主隊J^^客隊J^客隊J^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[11]="2711^#5ca39a^墨西甲春^墨西甲春^^主隊K^主隊K^^客隊K^客隊K^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[12]="2712^#5ca39a^墨西哥甲組聯賽^墨西哥甲組聯賽^^主隊L^主隊L^^客隊L^客隊L^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[13]="2713^#5ca39a^荷女甲^荷女甲^^主隊M^主隊M^^客隊M^客隊M^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+    A[14]="2714^#5ca39a^女子荷蘭甲組聯賽^女子荷蘭甲組聯賽^^主隊N^主隊N^^客隊N^客隊N^^22:00^2026,3,28,23,07,38^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');
+  `;
+
+  assert.deepEqual(
+    parseLiveMatches(script).map((match) => match.matchId),
+    ["2701", "2702", "2703", "2704", "2705", "2706", "2707", "2708", "2709", "2710", "2711", "2712", "2713", "2714"]
   );
 });
 
@@ -1930,6 +1975,34 @@ test("HKJC match checker short-circuits empty Titan lists", async () => {
   const result = await checkTitanMatchesInHkjc({ matches: [] });
   assert.equal(result.checkedMatches, 0);
   assert.deepEqual(result.checks, []);
+});
+
+test("HKJC match catalog derives all open target pools from one HAD response", () => {
+  const record = hkjcInternals.hkjcCatalogOpenRecord(
+    {
+      id: "5001",
+      frontEndId: "FB1",
+      kickOffTime: "2026-05-01T20:00:00.000+08:00",
+      status: "PREEVENT",
+      tournament: { name_ch: "測試盃" },
+      homeTeam: { name_ch: "主隊" },
+      awayTeam: { name_ch: "客隊" },
+      poolInfo: { sellingPools: ["HAD", "FHA", "EHH", "EHL", "FHL", "CRS"] },
+      foPools: [{ oddsType: "HAD", status: "SELLINGSTARTED", lines: [] }],
+    },
+    ["HAD", "FHA", "HHA", "HIL", "FHL"]
+  );
+
+  assert.deepEqual(record.poolTypes, ["HAD", "FHA", "EHH", "EHL", "FHL"]);
+  assert.deepEqual(record.sourcePools, ["HAD"]);
+  assert.equal(record.pools[2].sourcePage, "https://bet.hkjc.com/ch/football/hha");
+  assert.equal(record.pools[3].sourcePage, "https://bet.hkjc.com/ch/football/hil");
+});
+
+test("HKJC retry classifier retries transient failures only", () => {
+  assert.equal(hkjcInternals.isRetryableHkjcError(Object.assign(new Error("rate limited"), { statusCode: 429 })), true);
+  assert.equal(hkjcInternals.isRetryableHkjcError(new Error("socket hang up")), true);
+  assert.equal(hkjcInternals.isRetryableHkjcError(new Error("Invalid queration arguments")), false);
 });
 
 test("normalizeOdds compares integer-style HKJC odds as two decimals", () => {
