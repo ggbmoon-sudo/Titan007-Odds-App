@@ -331,6 +331,33 @@ const COMPETITION_ALIAS_GROUPS = [
   ["智利盃", "智利杯", "智利足總盃", "智利足总杯", "chile cup", "copa chile"],
   ["智利聯杯", "智利联杯", "智利聯賽盃", "智利联赛杯", "chile league cup", "copa de la liga chile"],
   ["巴西乙", "巴乙", "巴西乙組聯賽", "巴西乙组联赛", "brazil serie b", "brazilian serie b", "brasileiro serie b"],
+  ["阿聯盃", "阿联杯", "阿聯酋總統盃", "阿联酋总统杯", "uae president cup", "president cup"],
+  ["世女盃u20", "世女杯u20", "女子世青盃", "女子世青杯", "u20 women world championship"],
+  ["歐女盃", "欧女杯", "女子歐洲聯賽冠軍盃", "女子欧洲联赛冠军杯", "women ue champions", "uefa women s champions league"],
+  ["海灣運", "海湾运", "海灣盃", "海湾杯", "gulf cup"],
+  ["英女盃", "英女杯", "女子英格蘭聯賽盃", "女子英格兰联赛杯", "women english league cup"],
+  ["烏拉盃", "乌拉杯", "烏拉圭盃", "乌拉圭杯", "uruguayan cup", "copa auf uruguay"],
+  ["歐國聯", "欧国联", "歐洲國家聯賽", "欧洲国家联赛", "uefa nations league", "nations league"],
+  [
+    "非洲盃",
+    "非洲杯",
+    "非洲國家盃",
+    "非洲国家杯",
+    "非國盃",
+    "非国杯",
+    "非國盃外",
+    "非国杯外",
+    "非洲盃外",
+    "非洲杯外",
+    "非國盃外圍賽",
+    "非国杯外围赛",
+    "非洲盃外圍賽",
+    "非洲杯外围赛",
+    "africa cup of nations",
+    "africa cup of nations qualification",
+    "afcon",
+    "afcon qualifiers",
+  ],
 ];
 
 const TEAM_ALIAS_GROUPS = [
@@ -351,6 +378,12 @@ const TEAM_ALIAS_GROUPS = [
   ["奧希金斯", "希金斯", "o higgins", "ohiggins"],
   ["聖保羅", "圣保罗", "sao paulo"],
   ["FC邁亞密", "邁亞密FC", "迈阿密FC", "miami fc"],
+  ["蒙特維多利物浦", "蒙特维多利物浦", "利物浦蒙特維多", "利物浦蒙特维多", "montevideo liverpool", "liverpool montevideo"],
+  ["蒙特維多高隆FC", "蒙特维多高隆FC", "科爾隆", "科尔隆", "montevideo colon fc", "colon montevideo"],
+  ["古里高聯", "古里高联", "克里科", "curico unido"],
+  ["康塞普森體育", "康塞普森体育", "迪康塞普森", "deportes concepcion"],
+  ["蒙特維多流浪者", "蒙特维多流浪者", "漫遊者", "漫游者", "montevideo wanderers"],
+  ["芬斯", "芬歷斯", "芬历斯", "fenix"],
 ];
 
 function foldComparableText(value) {

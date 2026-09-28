@@ -815,6 +815,37 @@ test("parseLiveMatches includes newly added HKJC competitions", () => {
   );
 });
 
+test("parseLiveMatches includes verified HKJC competitions found on Titan", () => {
+  const leagues = ["阿聯盃", "世女盃U20", "歐女盃", "海灣運", "英女盃", "烏拉盃", "歐國聯", "非洲盃"];
+  const script = leagues
+    .map(
+      (league, index) =>
+        `A[${index + 1}]="28${index + 1}^#5ca39a^${league}^${league}^^主隊${index}^主隊${index}^^客隊${index}^客隊${index}^^22:00^2026,9,23,22,00,00^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');`
+    )
+    .join("\n");
+
+  assert.deepEqual(
+    parseLiveMatches(`var A=Array(${leagues.length});${script}`).map((match) => match.league),
+    leagues
+  );
+  for (const league of leagues) assert.ok(DEFAULT_ALLOWED_LEAGUES.includes(league));
+});
+
+test("parseLiveMatches includes Nations League and AFCON qualifier aliases", () => {
+  const leagues = ["歐洲國家聯賽", "欧洲国家联赛", "非國盃外", "非國盃外圍賽", "非洲杯外围赛"];
+  const script = leagues
+    .map(
+      (league, index) =>
+        `A[${index + 1}]="29${index + 1}^#5ca39a^${league}^${league}^^主隊${index}^主隊${index}^^客隊${index}^客隊${index}^^22:00^2026,9,25,22,00,00^0^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^".split('^');`
+    )
+    .join("\n");
+
+  assert.deepEqual(
+    parseLiveMatches(`var A=Array(${leagues.length});${script}`).map((match) => match.league),
+    leagues
+  );
+});
+
 test("parseLiveMatches includes Japan top league current-year aliases", () => {
   const script = `
     var A=Array(1);
@@ -1818,6 +1849,54 @@ test("HKJC match checker uses Titan translated team aliases", () => {
   assert.equal(check.status, "open");
   assert.equal(check.matched.frontEndId, "FB8939");
   assert.ok(check.score >= 90);
+});
+
+test("HKJC match checker recognizes Nations League and AFCON qualifier competition aliases", () => {
+  const cases = [
+    {
+      titan: { league: "歐國聯", home: "荷蘭", away: "德國", kickoffTime: "02:45" },
+      hkjc: { tournament: "歐洲國家聯賽", home: "荷蘭", away: "德國", kickOffTime: "2026-09-26T02:45:00.000+08:00" },
+    },
+    {
+      titan: { league: "非洲盃", home: "喀麥隆", away: "科摩羅", kickoffTime: "03:00" },
+      hkjc: { tournament: "非國盃外圍賽", home: "喀麥隆", away: "科摩羅", kickOffTime: "2026-09-26T03:00:00.000+08:00" },
+    },
+  ];
+
+  for (const [index, item] of cases.entries()) {
+    const check = hkjcInternals.compareTitanMatchToHkjc(
+      { matchId: String(5000 + index), ...item.titan },
+      [{ matchId: `hk-competition-${index}`, poolTypes: ["HAD"], ...item.hkjc }]
+    );
+    assert.equal(check.status, "open");
+    assert.equal(check.leagueScore, 100);
+  }
+});
+
+test("HKJC match checker matches verified Uruguay and Chile naming variants", () => {
+  const cases = [
+    {
+      titan: { league: "烏拉盃", home: "利物浦蒙特維多", away: "科尔隆", kickoffTime: "02:30" },
+      hkjc: { tournament: "烏拉圭盃", home: "蒙特維多利物浦", away: "蒙特維多高隆FC", kickOffTime: "2026-09-24T02:27:00.000+08:00" },
+    },
+    {
+      titan: { league: "智利盃", home: "克里科", away: "迪康塞普森", kickoffTime: "05:00" },
+      hkjc: { tournament: "智利盃", home: "古里高聯", away: "康塞普森體育", kickOffTime: "2026-09-24T04:57:00.000+08:00" },
+    },
+    {
+      titan: { league: "烏拉盃", home: "漫遊者", away: "賽利托", kickoffTime: "07:00" },
+      hkjc: { tournament: "烏拉圭盃", home: "蒙特維多流浪者", away: "賽利托", kickOffTime: "2026-09-24T06:57:00.000+08:00" },
+    },
+  ];
+
+  for (const [index, item] of cases.entries()) {
+    const check = hkjcInternals.compareTitanMatchToHkjc(
+      { matchId: String(4000 + index), ...item.titan },
+      [{ matchId: `hk-${index}`, poolTypes: ["HAD"], ...item.hkjc }]
+    );
+    assert.equal(check.status, "open");
+    assert.ok(check.score >= 90);
+  }
 });
 
 test("HKJC match checker tolerates club prefixes and one-character transliteration drift", () => {
