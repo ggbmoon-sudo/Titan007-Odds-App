@@ -14,6 +14,14 @@ const MOBILE_USER_AGENT =
   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 const TITAN_VIP_DNS_CACHE_MS = 10 * 60 * 1000;
 const titanVipDnsCache = new Map();
+const TITAN_VIP_MAX_CONCURRENT_REQUESTS = Math.max(
+  1,
+  Math.min(Number(process.env.TITAN_VIP_MAX_CONCURRENT_REQUESTS || 2), 4)
+);
+const TITAN_VIP_REQUEST_GAP_MS = Math.max(0, Number(process.env.TITAN_VIP_REQUEST_GAP_MS || 250));
+let titanVipActiveRequests = 0;
+let titanVipNextStartAt = 0;
+const titanVipRequestWaiters = [];
 
 const DEFAULT_ALLOWED_LEAGUES = [
   "英超",
@@ -941,7 +949,40 @@ function fetchText(url, options = {}) {
   });
 }
 
-function fetchTextWithCurl(url, options = {}) {
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function acquireTitanVipRequestSlot() {
+  if (titanVipActiveRequests >= TITAN_VIP_MAX_CONCURRENT_REQUESTS) {
+    await new Promise((resolve) => titanVipRequestWaiters.push(resolve));
+  }
+
+  titanVipActiveRequests += 1;
+  const now = Date.now();
+  const startAt = Math.max(now, titanVipNextStartAt);
+  titanVipNextStartAt = startAt + TITAN_VIP_REQUEST_GAP_MS;
+  if (startAt > now) await wait(startAt - now);
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    titanVipActiveRequests = Math.max(0, titanVipActiveRequests - 1);
+    titanVipRequestWaiters.shift()?.();
+  };
+}
+
+async function withTitanVipRequestSlot(task) {
+  const release = await acquireTitanVipRequestSlot();
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
+
+function buildCurlArgs(url, options = {}) {
   const timeoutMs = options.timeoutMs || 30000;
   const curlTimeoutMs = Number(options.curlTimeoutMs || Math.min(timeoutMs, 18000));
   const referer = options.referer || DEFAULT_REFERER;
@@ -954,6 +995,7 @@ function fetchTextWithCurl(url, options = {}) {
   const args = [
     "-sS",
     "-L",
+    ...(options.forceHttp1 || isTitanVipUrl(url) ? ["--http1.1"] : []),
     "--connect-timeout",
     String(connectTimeoutSeconds),
     "--max-time",
@@ -968,6 +1010,8 @@ function fetchTextWithCurl(url, options = {}) {
     "Accept-Language: zh-HK,zh;q=0.9,zh-CN;q=0.8,en;q=0.7",
     "-H",
     "Cache-Control: no-cache",
+    "-H",
+    "Connection: close",
   ];
   if (options.curlResolve) {
     args.push("--resolve", String(options.curlResolve));
@@ -978,8 +1022,15 @@ function fetchTextWithCurl(url, options = {}) {
     }
   }
   args.push(url);
+  return args;
+}
 
-  return new Promise((resolve, reject) => {
+function fetchTextWithCurl(url, options = {}) {
+  const timeoutMs = options.timeoutMs || 30000;
+  const curlTimeoutMs = Number(options.curlTimeoutMs || Math.min(timeoutMs, 18000));
+  const args = buildCurlArgs(url, options);
+
+  const execute = () => new Promise((resolve, reject) => {
     execFile(
       process.platform === "win32" ? "curl.exe" : "curl",
       args,
@@ -1012,10 +1063,16 @@ function fetchTextWithCurl(url, options = {}) {
       }
     );
   });
+
+  return isTitanVipUrl(url) || options.titanVipRequest
+    ? withTitanVipRequestSlot(execute)
+    : execute();
 }
 
 function isFetchRecoverable(error) {
-  return /timeout|socket|ECONN|EAI_|EACCES|TLS|network/i.test(String(error?.message || error || ""));
+  return /timeout|socket|ECONN|EAI_|EACCES|TLS|network|curl:\s*\(92\)|HTTP\/2.*(?:stream|PROTOCOL_ERROR)|PROTOCOL_ERROR/i.test(
+    String(error?.message || error || "")
+  );
 }
 
 function isTitanVipUrl(url) {
@@ -1030,7 +1087,7 @@ function isTitanVipUrl(url) {
 function isTitanVipTransportError(error) {
   if (error?.code === "TITAN_VIP_TRANSPORT") return true;
   const message = String(error?.message || error || "");
-  return /schannel|handshake|ssl\/tls|UNEXPECTED_EOF|EOF occurred|ECONNRESET|socket disconnected before secure TLS|Empty reply from server|Connection timed out|Total timeout while fetching|Timeout while fetching|Could not resolve host/i.test(
+  return /schannel|handshake|ssl\/tls|UNEXPECTED_EOF|EOF occurred|ECONNRESET|socket disconnected before secure TLS|Empty reply from server|Connection timed out|Total timeout while fetching|Timeout while fetching|Could not resolve host|curl:\s*\(92\)|HTTP\/2.*(?:stream|PROTOCOL_ERROR)|PROTOCOL_ERROR/i.test(
     message
   );
 }
@@ -1096,6 +1153,8 @@ async function fetchTitanVipFallback(url, options, initialError) {
     ...options,
     curlTimeoutMs: Math.min(Number(options.curlTimeoutMs || options.timeoutMs || 12000), 12000),
     connectTimeoutSeconds: Math.min(Number(options.connectTimeoutSeconds || 6), 6),
+    forceHttp1: true,
+    titanVipRequest: true,
   };
 
   for (const address of addresses) {
@@ -1141,9 +1200,15 @@ async function fetchTitanVipFallback(url, options, initialError) {
 async function fetchUsingSelectedTransport(url, options) {
   try {
     return options.preferCurl
-      ? await fetchTextWithCurl(url, options).catch((error) => {
-          if (options.curlOnly) throw error;
-          return fetchText(url, options);
+      ? await fetchTextWithCurl(url, options).catch(async (curlError) => {
+          if (options.curlOnly) throw curlError;
+          try {
+            return await fetchText(url, options);
+          } catch (nodeError) {
+            throw new Error(
+              `${curlError.message || String(curlError)} | Node HTTPS fallback: ${nodeError.message || String(nodeError)}`
+            );
+          }
         })
       : await fetchText(url, options).catch((error) => {
           if (options.curlFallback !== false && isFetchRecoverable(error)) {
@@ -1167,11 +1232,22 @@ async function fetchFirstAvailable(urls, options = {}) {
       try {
         let response = await fetchUsingSelectedTransport(url, options);
         if (isTitanVipUrl(url) && response.incomplete) {
-          response = await fetchTitanVipFallback(
-            url,
-            options,
-            new Error(`Incomplete response while fetching ${url}`)
-          );
+          let partialIsUseful = false;
+          try {
+            assertUsefulHtml(response.text, url);
+            const partialText = String(response.text || "");
+            partialIsUseful =
+              partialText.length >= 4096 && /<table|odds|公司|澳門彩票|澳门彩票|Pinnacle|Bet365/i.test(partialText);
+          } catch {
+            partialIsUseful = false;
+          }
+          if (options.rejectIncomplete || !partialIsUseful) {
+            response = await fetchTitanVipFallback(
+              url,
+              options,
+              new Error(`Incomplete response while fetching ${url}`)
+            );
+          }
         }
         assertUsefulHtml(response.text, url);
         if (options.rejectIncomplete && response.incomplete) {
@@ -1820,10 +1896,10 @@ async function fetchAndParseMarket(url, market, period, options) {
     : [
         {
           referer: DEFAULT_REFERER,
-          timeoutMs: 16000,
-          attempts: 1,
+          timeoutMs: 18000,
+          attempts: 2,
           preferCurl: true,
-          curlOnly: true,
+          curlOnly: false,
           curlTimeoutMs: 12000,
           connectTimeoutSeconds: 6,
           rejectIncomplete: false,
@@ -2770,9 +2846,12 @@ module.exports = {
     extractFlatOddsRows,
     extractJsObjectLiteral,
     assertUsefulHtml,
+    buildCurlArgs,
     buildAllowedLeagueSet,
     expectedBookmakerKeysForMarket,
     fetchTitanVipFallback,
+    isFetchRecoverable,
+    isTitanVipTransportError,
     latestEuropeRows,
     headToHeadOverUnderStats,
     normalizeComparableText,

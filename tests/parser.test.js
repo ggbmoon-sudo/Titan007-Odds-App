@@ -111,6 +111,27 @@ test("Titan VIP transport fallback preserves host and match URL", () => {
   });
 });
 
+test("Titan VIP curl requests force HTTP/1.1 and close the connection", () => {
+  const url = "https://vip.titan007.com/AsianOdds_n.aspx?id=2981531&t=0&l=1";
+  const args = titanInternals.buildCurlArgs(url, {
+    timeoutMs: 16000,
+    curlTimeoutMs: 12000,
+  });
+
+  assert.ok(args.includes("--http1.1"));
+  assert.ok(args.includes("Connection: close"));
+  assert.equal(args.at(-1), url);
+});
+
+test("Titan VIP transport classifier retries curl HTTP/2 protocol errors", () => {
+  const error = new Error(
+    "curl: (92) HTTP/2 stream 1 was not closed cleanly: PROTOCOL_ERROR (err 1)"
+  );
+
+  assert.equal(titanInternals.isFetchRecoverable(error), true);
+  assert.equal(titanInternals.isTitanVipTransportError(error), true);
+});
+
 test("Titan V guess homepage parser reads support percentages", () => {
   const html = `
     <div class="title matchinfo" id="matchinfo_2916078" data-time="2026,4,6,12,00,00">

@@ -1429,6 +1429,9 @@ function summarizeTechnicalError(error) {
   if (/Titan007 VIP (?:TLS\/路由失敗|主連線及直連備援)|TITAN_VIP_TRANSPORT|schannel|ssl\/tls|handshake|UNEXPECTED_EOF|before secure TLS|Connection timed out/i.test(text)) {
     return `Titan007 VIP 主連線及直連備援都失敗，請稍後按重試${urlHint}`;
   }
+  if (/curl:\s*\(92\)|HTTP\/2.*(?:stream|PROTOCOL_ERROR)|PROTOCOL_ERROR/i.test(text)) {
+    return `Titan007 HTTP/2 連線中斷，已嘗試 HTTP/1.1 及備援；請稍後按重試${urlHint}`;
+  }
   if (/timed out|timeout|逾時/i.test(text)) return `${http || "請求逾時"}${urlHint}`;
   if (/socket hang up|ECONNRESET|connection reset/i.test(text)) return `連線中斷${urlHint}`;
   if (/error page|returned an error/i.test(text)) return `Titan007 回傳錯誤頁${urlHint}`;
