@@ -1217,7 +1217,7 @@ async function fetchUsingSelectedTransport(url, options) {
           throw error;
         });
   } catch (error) {
-    if (isTitanVipUrl(url) && isTitanVipTransportError(error)) {
+    if (options.vipFallback !== false && isTitanVipUrl(url) && isTitanVipTransportError(error)) {
       return fetchTitanVipFallback(url, options, error);
     }
     throw error;
@@ -1851,6 +1851,131 @@ function buildMarketCandidate(url, response, rows, market, period, options = {})
   };
 }
 
+const MOBILE_ODDS_SOURCES = [
+  { property: "sbOdds", companyId: "3", company: "Crow*" },
+  { property: "bet365Odds", companyId: "8", company: "36*" },
+  { property: "jcOdds", companyId: "48", company: "香港馬*" },
+];
+
+function mobileOddsValue(value) {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function mobileOddsTime(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+  return new Date(timestamp * 1000).toISOString();
+}
+
+function parseTitanMobileOddsRows(input, market, period) {
+  const data = typeof input === "string" ? parseFreshJsonData(input) : input;
+  if (!data || typeof data !== "object") return [];
+
+  const kind = market === "asian" ? "ASIAN" : market === "overUnder" ? "OU" : "EURO";
+  const listKey = period === "half" ? "sbOddsHalf" : "sbOdds";
+  const config = MARKET_CONFIG[market];
+  if (!config && market !== "europe") return [];
+
+  const rows = [];
+  for (const source of MOBILE_ODDS_SOURCES) {
+    const container = data[source.property];
+    const entries = Array.isArray(container?.[listKey]) ? container[listKey] : [];
+    const record = entries.find((entry) => String(entry?.kind || "").toUpperCase() === kind);
+    const odds = record?.odds;
+    if (!odds) continue;
+
+    if (market === "europe") {
+      rows.push({
+        market,
+        period,
+        companyId: mobileOddsValue(odds.companyId || source.companyId),
+        company: source.company,
+        win: mobileOddsValue(odds.firstHomeOdds),
+        draw: mobileOddsValue(odds.firstDrawOdds),
+        loss: mobileOddsValue(odds.firstAwayOdds),
+        current: {
+          win: mobileOddsValue(odds.homeOdds),
+          draw: mobileOddsValue(odds.drawOdds),
+          loss: mobileOddsValue(odds.awayOdds),
+        },
+        changedAt: mobileOddsTime(odds.modifyTime),
+      });
+      continue;
+    }
+
+    const initial = {
+      [config.names[0]]: mobileOddsValue(odds.firstHomeOdds),
+      [config.names[1]]: mobileOddsValue(odds.firstDrawOdds),
+      [config.names[2]]: mobileOddsValue(odds.firstAwayOdds),
+      [config.lineValueKey]: mobileOddsValue(odds.firstDrawOdds),
+      time: "",
+    };
+    const current = {
+      [config.names[0]]: mobileOddsValue(odds.homeOdds),
+      [config.names[1]]: mobileOddsValue(odds.drawOdds),
+      [config.names[2]]: mobileOddsValue(odds.awayOdds),
+      [config.lineValueKey]: mobileOddsValue(odds.drawOdds),
+      time: mobileOddsTime(odds.modifyTime),
+    };
+    rows.push({
+      market,
+      period,
+      companyId: mobileOddsValue(odds.companyId || source.companyId),
+      company: source.company,
+      isClosed: false,
+      isMultiLine: false,
+      multiLabel: "",
+      initial,
+      current,
+      lastBeforeCurrent: null,
+      source: "titan-mobile",
+    });
+  }
+
+  return rows;
+}
+
+async function fetchTitanMobileOddsSnapshot(matchId, options = {}) {
+  const sourceUrl = titanProbabilityUrl(matchId);
+  const response = await fetchFirstAvailable([sourceUrl], {
+    referer: `https://m.titan007.com/analy/Analysis/${matchId}.htm`,
+    userAgent: MOBILE_USER_AGENT,
+    timeoutMs: Number(options.mobileTimeoutMs || 18000),
+    attempts: 2,
+    preferCurl: false,
+    idleCompleteMs: 1400,
+  });
+  const data = parseFreshJsonData(response.text);
+  if (!data || String(data.scheduleId || "") !== String(matchId)) {
+    throw new Error(`Titan Mobile 未能讀取賽事 ${matchId} 的賠率資料。`);
+  }
+  return {
+    sourceUrl: response.url || sourceUrl,
+    html: response.text,
+    data,
+  };
+}
+
+function buildTitanMobileMarket(snapshot, market, period, options = {}) {
+  const rawRows = parseTitanMobileOddsRows(snapshot.data, market, period);
+  const candidate = buildMarketCandidate(
+    snapshot.sourceUrl,
+    { url: snapshot.sourceUrl, incomplete: false },
+    rawRows,
+    market,
+    period,
+    options
+  );
+  const { score, incomplete, ...output } = candidate;
+  return {
+    ...output,
+    sourceType: "titan-mobile",
+    warning: rawRows.length
+      ? "快速模式使用 Titan Mobile 穩定來源；深度補齊模式可再嘗試其他莊家。"
+      : `Titan Mobile 暫未提供${MARKET_CONFIG[market]?.label || market} ${period} 資料。`,
+  };
+}
+
 function marketCandidateNeedsRetry(candidate) {
   if (!candidate) return true;
   if (candidate.incomplete) return true;
@@ -1896,13 +2021,14 @@ async function fetchAndParseMarket(url, market, period, options) {
     : [
         {
           referer: DEFAULT_REFERER,
-          timeoutMs: 18000,
-          attempts: 2,
+          timeoutMs: 10000,
+          attempts: 1,
           preferCurl: true,
-          curlOnly: false,
-          curlTimeoutMs: 12000,
+          curlOnly: true,
+          curlTimeoutMs: 8000,
           connectTimeoutSeconds: 6,
           rejectIncomplete: false,
+          vipFallback: false,
         },
       ];
   const errors = [];
@@ -2079,13 +2205,33 @@ async function extractMatchOdds(matchId, options = {}) {
     ]);
     europe = await fetchEurope(matchId, urls.europe, options);
   } else {
-    [asianFull, asianHalf, overUnderFull, overUnderHalf, europe] = await Promise.all([
-      safeFetchAndParseMarket(urls.asianFull, "asian", "full", options),
-      safeFetchAndParseMarket(urls.asianHalf, "asian", "half", options),
-      safeFetchAndParseMarket(urls.overUnderFull, "overUnder", "full", options),
-      safeFetchAndParseMarket(urls.overUnderHalf, "overUnder", "half", options),
+    const [mobileResult, europeResult] = await Promise.all([
+      fetchTitanMobileOddsSnapshot(matchId, options)
+        .then((snapshot) => ({ snapshot, error: null }))
+        .catch((error) => ({ snapshot: null, error })),
       fetchEurope(matchId, urls.europe, options),
     ]);
+    europe = europeResult;
+
+    if (mobileResult.snapshot) {
+      asianFull = buildTitanMobileMarket(mobileResult.snapshot, "asian", "full", options);
+      asianHalf = buildTitanMobileMarket(mobileResult.snapshot, "asian", "half", options);
+      overUnderFull = buildTitanMobileMarket(mobileResult.snapshot, "overUnder", "full", options);
+      overUnderHalf = buildTitanMobileMarket(mobileResult.snapshot, "overUnder", "half", options);
+    } else {
+      [asianFull, asianHalf, overUnderFull, overUnderHalf] = await Promise.all([
+        safeFetchAndParseMarket(urls.asianFull, "asian", "full", options),
+        safeFetchAndParseMarket(urls.asianHalf, "asian", "half", options),
+        safeFetchAndParseMarket(urls.overUnderFull, "overUnder", "full", options),
+        safeFetchAndParseMarket(urls.overUnderHalf, "overUnder", "half", options),
+      ]);
+      const mobileError = mobileResult.error?.message || String(mobileResult.error || "");
+      for (const section of [asianFull, asianHalf, overUnderFull, overUnderHalf]) {
+        section.warning = [section.warning, mobileError ? `Titan Mobile 備援失敗：${mobileError}` : ""]
+          .filter(Boolean)
+          .join(" | ");
+      }
+    }
   }
   const match = mergeMatchMeta(
     asianFull?.matchMeta,
@@ -2859,6 +3005,7 @@ module.exports = {
     parseJsArrayItems,
     parseOddsPageMeta,
     parsePanluRecords,
+    parseTitanMobileOddsRows,
     parseProbabilityEvents,
     parseProbabilityEventsFromJson,
     probabilityTextLines,

@@ -132,6 +132,75 @@ test("Titan VIP transport classifier retries curl HTTP/2 protocol errors", () =>
   assert.equal(titanInternals.isTitanVipTransportError(error), true);
 });
 
+test("Titan Mobile odds parser provides stable full and half market rows", () => {
+  const mobileData = {
+    scheduleId: 2981533,
+    sbOdds: {
+      sbOdds: [
+        {
+          kind: "ASIAN",
+          odds: {
+            companyId: 3,
+            firstHomeOdds: 0.95,
+            firstDrawOdds: 0.75,
+            firstAwayOdds: 0.93,
+            homeOdds: 0.95,
+            drawOdds: 1,
+            awayOdds: 0.94,
+            modifyTime: "1790689460",
+          },
+        },
+      ],
+      sbOddsHalf: [
+        {
+          kind: "OU",
+          odds: {
+            companyId: 3,
+            firstHomeOdds: 0.76,
+            firstDrawOdds: 0.75,
+            firstAwayOdds: 1.11,
+            homeOdds: 0.94,
+            drawOdds: 1,
+            awayOdds: 0.94,
+            modifyTime: "1790688798",
+          },
+        },
+      ],
+    },
+    bet365Odds: {
+      sbOdds: [
+        {
+          kind: "ASIAN",
+          odds: {
+            companyId: 8,
+            firstHomeOdds: 0.78,
+            firstDrawOdds: 0.5,
+            firstAwayOdds: 1.03,
+            homeOdds: 0.95,
+            drawOdds: 1,
+            awayOdds: 0.85,
+            modifyTime: "1790688480",
+          },
+        },
+      ],
+      sbOddsHalf: [],
+    },
+  };
+
+  const asianFull = titanInternals.parseTitanMobileOddsRows(mobileData, "asian", "full");
+  assert.equal(asianFull.length, 2);
+  assert.equal(asianFull[0].company, "Crow*");
+  assert.equal(asianFull[0].initial.handicapValue, "0.75");
+  assert.equal(asianFull[0].current.homeOdds, "0.95");
+  assert.equal(asianFull[1].company, "36*");
+
+  const overUnderHalf = titanInternals.parseTitanMobileOddsRows(mobileData, "overUnder", "half");
+  assert.equal(overUnderHalf.length, 1);
+  assert.equal(overUnderHalf[0].initial.totalValue, "0.75");
+  assert.equal(overUnderHalf[0].current.total, "1");
+  assert.equal(overUnderHalf[0].source, "titan-mobile");
+});
+
 test("Titan V guess homepage parser reads support percentages", () => {
   const html = `
     <div class="title matchinfo" id="matchinfo_2916078" data-time="2026,4,6,12,00,00">
