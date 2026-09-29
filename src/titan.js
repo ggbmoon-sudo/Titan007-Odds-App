@@ -1258,7 +1258,7 @@ async function fetchFirstAvailable(urls, options = {}) {
         const outputError =
           error?.code === "TITAN_VIP_TRANSPORT"
             ? error
-            : isTitanVipUrl(url) && isTitanVipTransportError(error)
+            : options.vipFallback !== false && isTitanVipUrl(url) && isTitanVipTransportError(error)
             ? titanVipTransportError(url, error)
             : error;
         const suffix = attempts > 1 ? ` (attempt ${attempt}/${attempts})` : "";
@@ -1940,8 +1940,9 @@ async function fetchTitanMobileOddsSnapshot(matchId, options = {}) {
   const response = await fetchFirstAvailable([sourceUrl], {
     referer: `https://m.titan007.com/analy/Analysis/${matchId}.htm`,
     userAgent: MOBILE_USER_AGENT,
-    timeoutMs: Number(options.mobileTimeoutMs || 18000),
-    attempts: 2,
+    timeoutMs: Number(options.mobileTimeoutMs || 12000),
+    curlTimeoutMs: Number(options.mobileCurlTimeoutMs || 10000),
+    attempts: 1,
     preferCurl: false,
     idleCompleteMs: 1400,
   });
@@ -1992,30 +1993,14 @@ async function fetchAndParseMarket(url, market, period, options) {
     ? [
         {
           referer: DEFAULT_REFERER,
-          timeoutMs: 30000,
-          attempts: 2,
-          preferCurl: true,
-          curlOnly: true,
-          curlTimeoutMs: 18000,
-          connectTimeoutSeconds: 8,
-          rejectIncomplete: true,
-        },
-        {
-          referer: DEFAULT_REFERER,
-          timeoutMs: 45000,
+          timeoutMs: 10000,
           attempts: 1,
           preferCurl: true,
           curlOnly: true,
-          curlTimeoutMs: 35000,
-          connectTimeoutSeconds: 10,
-          rejectIncomplete: true,
-        },
-        {
-          referer: DEFAULT_REFERER,
-          timeoutMs: 30000,
-          attempts: 1,
-          preferCurl: false,
-          idleCompleteMs: 0,
+          curlTimeoutMs: 8000,
+          connectTimeoutSeconds: 6,
+          rejectIncomplete: false,
+          vipFallback: false,
         },
       ]
     : [
@@ -2083,11 +2068,11 @@ async function fetchEurope(matchId, urls, options = {}) {
   const directFetchOptions = deepMode
     ? {
         referer: "https://1x2.titan007.com/",
-        timeoutMs: 40000,
-        attempts: 2,
+        timeoutMs: 16000,
+        attempts: 1,
         preferCurl: true,
         curlOnly: true,
-        curlTimeoutMs: 35000,
+        curlTimeoutMs: 15000,
       }
     : {
         referer: "https://1x2.titan007.com/",
@@ -2143,15 +2128,15 @@ async function fetchEurope(matchId, urls, options = {}) {
   try {
     const page = await fetchFirstAvailable(urls, {
       referer: DEFAULT_REFERER,
-      timeoutMs: 20000,
+      timeoutMs: 12000,
       attempts: 1,
       preferCurl: true,
     });
     const dataUrl = extractEuropeDataUrl(page.text, matchId, page.url);
     const response = await fetchFirstAvailable([dataUrl], {
       referer: page.url,
-      timeoutMs: 45000,
-      attempts: 2,
+      timeoutMs: 16000,
+      attempts: 1,
       preferCurl: true,
     });
     const dataRows = parseEuropeDataJs(response.text);
@@ -2194,21 +2179,47 @@ async function extractMatchOdds(matchId, options = {}) {
   let overUnderHalf;
   let europe;
 
+  const mobilePromise = fetchTitanMobileOddsSnapshot(matchId, options)
+    .then((snapshot) => ({ snapshot, error: null }))
+    .catch((error) => ({ snapshot: null, error }));
+
   if (deepMode) {
-    [asianFull, asianHalf] = await Promise.all([
-      safeFetchAndParseMarket(urls.asianFull, "asian", "full", options),
-      safeFetchAndParseMarket(urls.asianHalf, "asian", "half", options),
-    ]);
-    [overUnderFull, overUnderHalf] = await Promise.all([
-      safeFetchAndParseMarket(urls.overUnderFull, "overUnder", "full", options),
-      safeFetchAndParseMarket(urls.overUnderHalf, "overUnder", "half", options),
-    ]);
-    europe = await fetchEurope(matchId, urls.europe, options);
+    const [mobileResult, asianFullResult, asianHalfResult, overUnderFullResult, overUnderHalfResult, europeResult] =
+      await Promise.all([
+        mobilePromise,
+        safeFetchAndParseMarket(urls.asianFull, "asian", "full", options),
+        safeFetchAndParseMarket(urls.asianHalf, "asian", "half", options),
+        safeFetchAndParseMarket(urls.overUnderFull, "overUnder", "full", options),
+        safeFetchAndParseMarket(urls.overUnderHalf, "overUnder", "half", options),
+        fetchEurope(matchId, urls.europe, options),
+      ]);
+    asianFull = asianFullResult;
+    asianHalf = asianHalfResult;
+    overUnderFull = overUnderFullResult;
+    overUnderHalf = overUnderHalfResult;
+    europe = europeResult;
+
+    if (mobileResult.snapshot) {
+      const mobileSections = [
+        buildTitanMobileMarket(mobileResult.snapshot, "asian", "full", options),
+        buildTitanMobileMarket(mobileResult.snapshot, "asian", "half", options),
+        buildTitanMobileMarket(mobileResult.snapshot, "overUnder", "full", options),
+        buildTitanMobileMarket(mobileResult.snapshot, "overUnder", "half", options),
+      ];
+      const primarySections = [asianFull, asianHalf, overUnderFull, overUnderHalf];
+      const resolvedSections = primarySections.map((primary, index) => {
+        if (primary?.rows?.length) return primary;
+        const fallback = mobileSections[index];
+        return {
+          ...fallback,
+          warning: "VIP 深度來源暫時不可用，已回落 Titan Mobile 穩定資料。",
+        };
+      });
+      [asianFull, asianHalf, overUnderFull, overUnderHalf] = resolvedSections;
+    }
   } else {
     const [mobileResult, europeResult] = await Promise.all([
-      fetchTitanMobileOddsSnapshot(matchId, options)
-        .then((snapshot) => ({ snapshot, error: null }))
-        .catch((error) => ({ snapshot: null, error })),
+      mobilePromise,
       fetchEurope(matchId, urls.europe, options),
     ]);
     europe = europeResult;
