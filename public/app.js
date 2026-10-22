@@ -1617,7 +1617,7 @@ function renderOddsTable(entries, market, errors = [], warnings = []) {
           <td>${escapeHtml(match.home || "")}</td>
           <td>${escapeHtml(match.away || "")}</td>
           <td>${escapeHtml(match.kickoffTime || "")}</td>
-          <td title="${escapeHtml(row.company)}">${escapeHtml(displayBookmaker(row))}${row.isClosed ? "（封）" : ""}</td>
+          <td title="${escapeHtml(row.source === 'hkjc-official' ? '馬會官網即時價（香港盤）；初盤未提供' : row.company)}">${escapeHtml(displayBookmaker(row))}${row.source === 'hkjc-official' ? '（官網）' : ''}${row.isClosed ? "（封）" : ""}</td>
           <td class="muted">${escapeHtml(row.companyId)}</td>
           <td class="muted">${escapeHtml(multi)}</td>
           <td class="number">${escapeHtml(row.initial[firstKey])}</td>

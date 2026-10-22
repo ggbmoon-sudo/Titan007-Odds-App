@@ -17,6 +17,57 @@ const { _internals: aiInternals } = require("../src/ai");
 const { _internals: diagnosticInternals } = require("../src/diagnostics");
 const { parseTitanGuessHomePage, parseTitanGuessIndexPage } = require("../src/titanGuess");
 
+test("mobile comparison preserves Pinna and HKJC initial/current odds and alternate lines", () => {
+  const data = { companies: [
+    { companyId: 47, nameEn: "pinnacle", details: [
+      { firstHomeOdds: 0.82, firstDrawOdds: 1, firstAwayOdds: 1.01, homeOdds: 1.07, drawOdds: 1.25, awayOdds: 0.85 },
+      { num: 2, homeOdds: 0.76, drawOdds: 1, awayOdds: 1.14 },
+    ] },
+    { companyId: 48, nameEn: "hkjc", details: [{ homeOdds: 0.95, drawOdds: 1.25, awayOdds: 0.85 }] },
+    { companyId: 8, nameEn: "Bet365", details: [{ homeOdds: null, awayOdds: 0.8 }] },
+  ] };
+  const rows = titanInternals.parseTitanMobileComparisonRows(data, "asian", "half");
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].initial.homeOdds, "0.82");
+  assert.equal(rows[0].current.handicapValue, "1.25");
+  assert.equal(rows[1].isMultiLine, true);
+  assert.equal(rows[2].initial.homeOdds, "");
+  assert.deepEqual(filterBookmakerRows(rows).map((row) => row.bookmakerKey), ["pinna", "hk_jockey"]);
+});
+
+test("HKJC extraction converts decimal odds and handicap sign without inventing opening prices", () => {
+  const combo = (str, currentOdds) => ({ str, currentOdds, status: "AVAILABLE" });
+  const match = { id: "123", foPools: [
+    { oddsType: "HDC", status: "SELLINGSTARTED", lines: [
+      { status: "AVAILABLE", main: true, condition: "-1.0/-1.5", combinations: [combo("H", "1.95"), combo("A", "1.85")] },
+      { status: "SUSPENDED", condition: "-1", combinations: [combo("H", "2"), combo("A", "2")] },
+    ] },
+    { oddsType: "FHL", status: "SELLINGSTARTED", lines: [
+      { status: "AVAILABLE", main: true, condition: "1.5/2.0", combinations: [combo("H", "2.58"), combo("L", "1.44")] },
+    ] },
+  ] };
+  const asian = hkjcInternals.hkjcExtractionRows(match, "asian", "full");
+  assert.equal(asian.length, 1);
+  assert.equal(asian[0].current.homeOdds, "0.95");
+  assert.equal(asian[0].current.awayOdds, "0.85");
+  assert.equal(asian[0].current.handicapValue, "1.25");
+  assert.equal(asian[0].initial.homeOdds, "");
+  assert.deepEqual(hkjcInternals.hkjcExtractionRows(match, "asian", "half"), []);
+  const half = hkjcInternals.hkjcExtractionRows(match, "overUnder", "half")[0];
+  assert.equal(half.current.totalValue, "1.75");
+  assert.equal(half.current.overOdds, "1.58");
+});
+
+test("market supplements update coverage without discarding existing bookmakers or HKJC opening data", () => {
+  const row = (companyId) => ({ market: "asian", companyId: String(companyId), initial: {}, current: {} });
+  const primary = { rows: [row(3), row(8)], matchMeta: { home: "法國" } };
+  const merged = titanInternals.mergeMarketSources(primary, { rows: [row(47), row(48)], sourceUrl: "https://m.titan007.com/" }, "asian", "full");
+  assert.equal(merged.coverageLabel, "4/4");
+  assert.deepEqual(merged.missingTargetBookmakers, []);
+  assert.equal(merged.matchMeta.home, "法國");
+  assert.strictEqual(titanInternals.mergeMarketSources(merged, { sourceType: "hkjc-official", rows: [row(48)] }, "asian", "full"), merged);
+});
+
 test("Titan useful HTML checker keeps valid mobile analysis pages with 404-like data", () => {
   const validHtml = [
     "<!DOCTYPE html><html><head><title>Analysis</title></head><body>",
@@ -906,7 +957,7 @@ test("parseLiveMatches includes newly added HKJC competitions", () => {
 });
 
 test("parseLiveMatches includes verified HKJC competitions found on Titan", () => {
-  const leagues = ["阿聯盃", "世女盃U20", "歐女盃", "海灣運", "英女盃", "烏拉盃", "歐國聯", "非洲盃"];
+  const leagues = ["阿聯盃", "世女盃U20", "歐女盃", "海灣運", "英女盃", "烏拉盃", "歐國聯", "非洲盃", "東盟盃", "阿聯酋盃", "东盟杯", "阿联酋杯"];
   const script = leagues
     .map(
       (league, index) =>
@@ -918,7 +969,7 @@ test("parseLiveMatches includes verified HKJC competitions found on Titan", () =
     parseLiveMatches(`var A=Array(${leagues.length});${script}`).map((match) => match.league),
     leagues
   );
-  for (const league of leagues) assert.ok(DEFAULT_ALLOWED_LEAGUES.includes(league));
+  for (const league of leagues.slice(0, 10)) assert.ok(DEFAULT_ALLOWED_LEAGUES.includes(league));
 });
 
 test("parseLiveMatches includes Nations League and AFCON qualifier aliases", () => {

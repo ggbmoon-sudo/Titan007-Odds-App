@@ -1,6 +1,7 @@
 const http = require("node:http");
 const https = require("node:https");
 const dns = require("node:dns").promises;
+const { fetchHkjcExtractionOdds } = require("./hkjc");
 const { execFile } = require("node:child_process");
 const { TextDecoder } = require("node:util");
 
@@ -105,6 +106,7 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "世界盃及外圍賽",
   "國際賽",
   "東南錦",
+  "東盟盃",
   "沙地聯",
   "阿聯酋聯",
   "卡塔爾聯",
@@ -112,6 +114,7 @@ const DEFAULT_ALLOWED_LEAGUES = [
   "歐冠盃",
   "烏拉甲",
   "阿聯盃",
+  "阿聯酋盃",
   "世女盃U20",
   "歐女盃",
   "海灣運",
@@ -125,6 +128,7 @@ const LEAGUE_ALIASES = {
   "世界盃及外圍賽": ["世界盃外圍賽", "世界杯外圍賽", "世界盃", "世界杯", "世盃", "世杯", "世盃外", "世杯外"],
   "國際賽": ["國際友誼", "国际友谊", "國際友誼賽", "国际友谊赛", "國際賽", "国际赛", "國際友賽", "国际友赛"],
   "東南錦": ["东南锦", "東南亞錦標賽", "东南亚锦标赛", "東盟錦標賽", "东盟锦标赛", "ASEAN Championship"],
+  "東盟盃": ["東盟杯", "东盟杯", "东盟盃"],
   "世界冠軍球會盃": ["世界冠軍俱樂部盃", "世界冠軍俱樂部杯", "世俱盃", "世俱杯"],
   "美冠聯": ["美冠联", "美國冠軍聯賽", "美国冠军联赛", "美國足球冠軍聯賽", "USL Championship", "USL冠軍聯賽"],
   "美冠盃": ["美冠杯", "中北美冠軍盃", "中北美冠軍杯", "中北美洲冠軍盃", "中北美洲冠軍杯", "CONCACAF Champions Cup"],
@@ -160,6 +164,7 @@ const LEAGUE_ALIASES = {
   "智利盃": ["智利杯", "智利足總盃", "智利足总杯", "Chile Cup", "Copa Chile"],
   "智利聯杯": ["智利联杯", "智利聯賽盃", "智利联赛杯", "Chile League Cup", "Copa de la Liga Chile"],
   "阿聯盃": ["阿联杯", "阿聯酋總統盃", "阿联酋总统杯", "UAE President Cup", "President Cup"],
+  "阿聯酋盃": ["阿聯酋杯", "阿联酋杯", "阿联酋盃"],
   "世女盃U20": ["世女杯U20", "女子世青盃", "女子世青杯", "U20 Women World Championship"],
   "歐女盃": ["欧女杯", "女子歐洲聯賽冠軍盃", "女子欧洲联赛冠军杯", "Women UE Champions", "UEFA Women's Champions League"],
   "海灣運": ["海湾运", "海灣盃", "海湾杯", "Gulf Cup"],
@@ -1335,13 +1340,16 @@ function parseOddsPageMeta(html, matchId = "") {
   const homeLinks = [...homeBlock.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)].map((item) => cleanMatchText(item[1])).filter(Boolean);
   const guestLinks = [...guestBlock.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)].map((item) => cleanMatchText(item[1])).filter(Boolean);
   const kickoffRaw = cleanMatchText(timeMatch?.[1] || "").replace(/\s*星期.*/u, "").trim();
+  const mobileName = (id) => cleanMatchText(new RegExp(`<div\\b[^>]*id=["']${id}["'][^>]*>([\\s\\S]*?)<\\/div>`, "i").exec(source)?.[1] || "");
+  const mobileLeague = cleanMatchText(extractDivBlockByClass(source, "league"));
+  const mobileKickoff = /\b\d{2}-\d{2}\s+(\d{2}:\d{2})/.exec(mobileLeague)?.[1] || "";
 
   const meta = {
     matchId: String(matchId || "").trim(),
     league: cleanMatchText(leagueMatch?.[1] || ""),
-    kickoffTime: kickoffRaw,
-    home: cleanMatchText(homeLinks[homeLinks.length - 1] || "").replace(/\(主\)$/u, ""),
-    away: cleanMatchText(guestLinks[guestLinks.length - 1] || "").replace(/\(客\)$/u, ""),
+    kickoffTime: kickoffRaw || mobileKickoff,
+    home: cleanMatchText(homeLinks[homeLinks.length - 1] || mobileName("homeName")).replace(/\(主\)$/u, ""),
+    away: cleanMatchText(guestLinks[guestLinks.length - 1] || mobileName("guestName")).replace(/\(客\)$/u, ""),
   };
 
   return Object.fromEntries(Object.entries(meta).filter(([, value]) => value));
@@ -1867,6 +1875,60 @@ function mobileOddsTime(value) {
   return new Date(timestamp * 1000).toISOString();
 }
 
+function parseTitanMobileComparisonRows(data, market, period) {
+  const config = MARKET_CONFIG[market];
+  if (!config || !Array.isArray(data?.companies)) return [];
+  const rows = [];
+  for (const company of data.companies) {
+    for (const [index, odds] of (company.details || []).entries()) {
+      if (!Number.isFinite(Number(odds.homeOdds)) || !Number.isFinite(Number(odds.awayOdds)) ||
+          odds.homeOdds == null || odds.awayOdds == null || odds.homeOdds === "" || odds.awayOdds === "") continue;
+      const triplet = (prefix) => ({
+        [config.names[0]]: mobileOddsValue(odds[prefix ? "firstHomeOdds" : "homeOdds"]),
+        [config.names[1]]: mobileOddsValue(odds[prefix ? "firstDrawOdds" : "drawOdds"]),
+        [config.names[2]]: mobileOddsValue(odds[prefix ? "firstAwayOdds" : "awayOdds"]),
+        [config.lineValueKey]: mobileOddsValue(odds[prefix ? "firstDrawOdds" : "drawOdds"]),
+        time: prefix ? "" : mobileOddsTime(odds.modifyTime),
+      });
+      rows.push({
+        market, period, companyId: String(company.companyId), company: company.nameEn || company.nameCn,
+        isClosed: odds.isStopLive !== undefined && odds.isStopLive !== false, isMultiLine: index > 0,
+        multiLabel: index > 0 ? `盤${odds.num || index + 1}` : "",
+        initial: triplet(true), current: triplet(false), lastBeforeCurrent: null,
+        source: "titan-mobile-comparison",
+      });
+    }
+  }
+  return rows;
+}
+
+async function fetchTitanMobileComparison(matchId, market, period, options = {}) {
+  const url = `https://m.titan007.com/HandicapDataInterface.ashx?scheid=${encodeURIComponent(matchId)}&type=1&oddskind=${market === "asian" ? 0 : 1}&isHalf=${period === "half" ? 1 : 0}`;
+  const response = await fetchFirstAvailable([url], {
+    referer: `https://m.titan007.com/${market === "asian" ? "asian" : "overunder"}/${matchId}.htm`,
+    userAgent: MOBILE_USER_AGENT, timeoutMs: 8000, curlTimeoutMs: 7000, attempts: 1,
+    preferCurl: false,
+  });
+  const data = JSON.parse(response.text);
+  if (String(data.scheduleId) !== String(matchId)) throw new Error("賽事 ID 不符");
+  const rows = parseTitanMobileComparisonRows(data, market, period).filter((row) => options.includeMulti || !row.isMultiLine);
+  const candidate = buildMarketCandidate(url, response, rows, market, period, options);
+  return { ...candidate, sourceType: "titan-mobile-comparison", warning: "" };
+}
+
+function mergeMarketSources(primary, supplement, market, period, options = {}) {
+  if (!supplement?.rows?.length) return primary;
+  if (supplement.sourceType === "hkjc-official" && primary?.rows?.some((row) => identifyBookmakerFromRow(row)?.key === "hk_jockey")) return primary;
+  const keys = new Set(supplement.rows.map((row) => identifyBookmakerFromRow(row)?.key));
+  const rows = [...supplement.rows, ...(primary?.rows || []).filter((row) => !keys.has(identifyBookmakerFromRow(row)?.key))];
+  return {
+    ...primary, ...supplement,
+    ...buildMarketCandidate(supplement.sourceUrl, { url: supplement.sourceUrl }, rows, market, period, options),
+    matchMeta: mergeMatchMeta(primary?.matchMeta, supplement.matchMeta),
+    error: "", warning: supplement.warning || "",
+  };
+}
+
 function parseTitanMobileOddsRows(input, market, period) {
   const data = typeof input === "string" ? parseFreshJsonData(input) : input;
   if (!data || typeof data !== "object") return [];
@@ -1961,7 +2023,7 @@ function buildTitanMobileMarket(snapshot, market, period, options = {}) {
   const rawRows = parseTitanMobileOddsRows(snapshot.data, market, period);
   const candidate = buildMarketCandidate(
     snapshot.sourceUrl,
-    { url: snapshot.sourceUrl, incomplete: false },
+    { url: snapshot.sourceUrl, text: snapshot.html, incomplete: false },
     rawRows,
     market,
     period,
@@ -2179,6 +2241,12 @@ async function extractMatchOdds(matchId, options = {}) {
   let overUnderHalf;
   let europe;
 
+  const comparisonPromise = Promise.all(
+    [["asian", "full"], ["asian", "half"], ["overUnder", "full"], ["overUnder", "half"]]
+      .map(([market, period]) => fetchTitanMobileComparison(matchId, market, period, options)
+        .catch(() => null))
+  );
+
   const mobilePromise = fetchTitanMobileOddsSnapshot(matchId, options)
     .then((snapshot) => ({ snapshot, error: null }))
     .catch((error) => ({ snapshot: null, error }));
@@ -2241,6 +2309,23 @@ async function extractMatchOdds(matchId, options = {}) {
         section.warning = [section.warning, mobileError ? `Titan Mobile 備援失敗：${mobileError}` : ""]
           .filter(Boolean)
           .join(" | ");
+      }
+    }
+  }
+  const comparisons = await comparisonPromise;
+  [asianFull, asianHalf, overUnderFull, overUnderHalf] =
+    [asianFull, asianHalf, overUnderFull, overUnderHalf].map((section, index) =>
+      mergeMarketSources(section, comparisons[index], index < 2 ? "asian" : "overUnder", index % 2 ? "half" : "full", options));
+  if ([asianFull, overUnderFull, overUnderHalf].some((section) => section?.missingTargetBookmakers?.includes("hk_jockey"))) {
+    try {
+      const metadata = mergeMatchMeta(options.match, asianFull?.matchMeta, { matchId });
+      const official = await fetchHkjcExtractionOdds(metadata);
+      asianFull = mergeMarketSources(asianFull, official.asianFull, "asian", "full", options);
+      overUnderFull = mergeMarketSources(overUnderFull, official.overUnderFull, "overUnder", "full", options);
+      overUnderHalf = mergeMarketSources(overUnderHalf, official.overUnderHalf, "overUnder", "half", options);
+    } catch (error) {
+      for (const section of [asianFull, overUnderFull, overUnderHalf]) {
+        if (section?.missingTargetBookmakers?.includes("hk_jockey")) section.warning = `馬會官網補齊失敗：${error.message}`;
       }
     }
   }
@@ -2383,7 +2468,7 @@ async function extractBatchOdds(matchItems, options = {}) {
 
       const match = items[index];
       try {
-        const data = await extractMatchOdds(match.matchId, options);
+        const data = await extractMatchOdds(match.matchId, { ...options, match });
         const enrichedMatch = mergeMatchMeta(match, data.match, { matchId: match.matchId });
         results[index] = {
           ok: true,
@@ -3017,6 +3102,8 @@ module.exports = {
     parseOddsPageMeta,
     parsePanluRecords,
     parseTitanMobileOddsRows,
+    parseTitanMobileComparisonRows,
+    mergeMarketSources,
     parseProbabilityEvents,
     parseProbabilityEventsFromJson,
     probabilityTextLines,

@@ -12,6 +12,8 @@ const HKJC_AGENT = new https.Agent({
 
 let hkjcCatalogCache = null;
 let hkjcCatalogPromise = null;
+const extractionCache = new Map();
+const extractionPromises = new Map();
 
 const HKJC_POOLS = {
   HAD: {
@@ -320,6 +322,8 @@ const CLUB_PREFIXES = [
 ];
 
 const COMPETITION_ALIAS_GROUPS = [
+  ["東盟盃", "東盟杯", "东盟杯", "东盟盃"],
+  ["阿聯酋盃", "阿聯酋杯", "阿联酋杯", "阿联酋盃"],
   ["解放者杯", "南美自由杯", "南美自由盃", "libertadores", "copa libertadores"],
   ["南美杯", "南美盃", "南美球会杯", "南美球會盃", "sudamericana", "copa sudamericana"],
   ["欧霸杯", "歐霸盃", "欧罗巴杯", "歐羅巴盃", "欧洲联赛", "歐洲聯賽", "europa league"],
@@ -825,6 +829,66 @@ async function checkTitanMatchesInHkjc(options = {}) {
 
 function selectionStr(combination) {
   return combination.str || combination.selections?.[0]?.str || "";
+}
+
+function hkjcExtractionRows(match, market, period) {
+  const poolType = market === "asian" ? (period === "full" ? "HDC" : "") : period === "half" ? "FHL" : "HIL";
+  const pool = (match.foPools || []).find((item) => item.oddsType === poolType && isOpenPool(item));
+  if (!pool) return [];
+  const rows = [];
+  for (const line of pool.lines || []) {
+    if (line.status !== "AVAILABLE") continue;
+    const combinations = (line.combinations || []).filter((item) => item.status === "AVAILABLE");
+    const first = combinations.find((item) => selectionStr(item) === "H");
+    const third = combinations.find((item) => selectionStr(item) === (market === "asian" ? "A" : "L"));
+    if (!(Number(first?.currentOdds) > 1) || !(Number(third?.currentOdds) > 1)) continue;
+    const parts = String(line.condition || "").split("/").map(Number);
+    if (!line.condition || parts.some((value) => !Number.isFinite(value))) continue;
+    const value = parts.reduce((sum, item) => sum + item, 0) / parts.length;
+    const keys = market === "asian" ? ["homeOdds", "handicap", "awayOdds", "handicapValue"] : ["overOdds", "total", "underOdds", "totalValue"];
+    rows.push({
+      market, period, companyId: "48", company: "香港賽馬會", source: "hkjc-official",
+      sourceUrl: `https://bet.hkjc.com/ch/football/${poolType.toLowerCase()}`,
+      hkjcMatchId: match.id, isClosed: false, isMultiLine: !line.main,
+      multiLabel: line.main ? "" : `盤${line.lineId}`,
+      initial: { [keys[0]]: "", [keys[1]]: "", [keys[2]]: "", [keys[3]]: "", time: "" },
+      current: { [keys[0]]: (Number(first.currentOdds) - 1).toFixed(2), [keys[1]]: String(market === "asian" ? -value : value),
+        [keys[2]]: (Number(third.currentOdds) - 1).toFixed(2), [keys[3]]: String(market === "asian" ? -value : value), time: pool.updateAt || match.updateAt || "" },
+      lastBeforeCurrent: null,
+    });
+  }
+  return rows.sort((a, b) => Number(a.isMultiLine) - Number(b.isMultiLine));
+}
+
+async function fetchHkjcExtractionOdds(titanMatch) {
+  if (!titanMatch?.home || !titanMatch?.away) return {};
+  const catalog = await fetchHkjcCatalog({ timeoutMs: 8000 });
+  const candidates = catalog.map((match) => ({ match, ...scoreMatchPair(titanMatch, baseMatch(match)) }))
+    .filter((item) => !item.swapped && item.homeScore >= 75 && item.awayScore >= 75 && item.timeScore >= 80 && item.score >= 85)
+    .sort((a, b) => b.score - a.score);
+  if (!candidates.length || (candidates[1] && candidates[0].score - candidates[1].score < 5)) return {};
+  const matchId = candidates[0].match.id;
+  if (!extractionCache.get(matchId) || extractionCache.get(matchId).expiresAt <= Date.now()) {
+    if (!extractionPromises.has(matchId)) {
+      const request = postGraphql({ query: HKJC_MATCH_QUERY, variables: {
+        matchIds: [matchId], fbOddsTypes: ["HDC", "HIL", "FHL"], fbOddsTypesM: ["HAD"],
+        inplayOnly: false, showAllMatch: true,
+      } }, { timeoutMs: 8000, attempts: 1 }).then((response) => {
+        extractionCache.set(matchId, { match: response.data?.matches?.find((item) => item.id === matchId), expiresAt: Date.now() + 30000 });
+        for (const [id, entry] of extractionCache) if (entry.expiresAt <= Date.now()) extractionCache.delete(id);
+      }).finally(() => { extractionPromises.delete(matchId); });
+      extractionPromises.set(matchId, request);
+    }
+    await extractionPromises.get(matchId);
+  }
+  const match = extractionCache.get(matchId)?.match;
+  if (!match) return {};
+  const result = {};
+  for (const [key, market, period] of [["asianFull", "asian", "full"], ["overUnderFull", "overUnder", "full"], ["overUnderHalf", "overUnder", "half"]]) {
+    const rows = hkjcExtractionRows(match, market, period);
+    result[key] = { rows, sourceType: "hkjc-official", sourceUrl: rows[0]?.sourceUrl || "", warning: "馬會官網提供即時價；初盤未提供。" };
+  }
+  return result;
 }
 
 function selectionName(combination) {
@@ -1568,11 +1632,13 @@ async function scanHkjcCorrectScoreEqualOdds(options = {}) {
 }
 
 module.exports = {
+  fetchHkjcExtractionOdds,
   checkTitanMatchesInHkjc,
   normalizeOdds,
   scanHkjcOdds,
   scanHkjcCorrectScoreEqualOdds,
   _internals: {
+    hkjcExtractionRows,
     HKJC_MATCH_QUERY,
     compareTitanMatchToHkjc,
     fetchHkjcOpenMatches,
