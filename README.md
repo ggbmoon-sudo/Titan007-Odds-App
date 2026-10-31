@@ -18,6 +18,12 @@ npm start
 http://127.0.0.1:3000/
 ```
 
+## Titan007 League Auto-Select
+
+Install Tampermonkey in your browser, start this local App, then click **自動選取聯賽腳本** in the App and confirm installation. Once installed, opening Titan007's live list automatically selects the leagues supported by this App and saves the filter through Titan007.
+
+The userscript reads the league list from the local App on ports 3000–3020. Keep the App running before opening or refreshing Titan007.
+
 ## Useful Files
 
 - `server.js`：本機 API server

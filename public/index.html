@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>賠率資料工作台</title>
-    <link rel="stylesheet" href="/styles.css?v=20260823-desktop-ux">
+    <link rel="stylesheet" href="/styles.css?v=20261031-titan-auto-select">
   </head>
   <body>
     <header class="app-header">
@@ -35,6 +35,10 @@
               <input id="leagueInput" type="search" placeholder="例：英超、日職；留空載入全部">
             </label>
             <button id="loadMatchesBtn" class="primary" type="button">更新賽事清單</button>
+            <div class="titan-actions">
+              <a class="button primary" href="https://live.titan007.com/indexall_big.aspx" target="_blank" rel="noreferrer">開啟 Titan007</a>
+              <a class="userscript-link" href="/titan007-auto-select.user.js">自動選取聯賽腳本</a>
+            </div>
           </div>
 
           <div class="match-updated" id="matchLastUpdated">清單會保存在本機，下次開啟毋須重新載入</div>
@@ -134,7 +138,7 @@
           </div>
         </section>
 
-        <section class="tool-section ai-section">
+        <section class="tool-section ai-section" aria-label="AI 分析操作">
           <div class="section-heading">
             <span>03</span>
             <h2>AI 分析</h2>
@@ -219,7 +223,7 @@
           </details>
         </section>
 
-        <details class="tool-section collapsible-section context-section">
+        <details class="tool-section collapsible-section context-section legacy-optional-section" aria-hidden="true">
           <summary>
             <span class="summary-icon">＋</span>
             <strong>04 外部資料 Context</strong>
@@ -248,7 +252,7 @@
           </div>
         </details>
 
-        <details class="tool-section collapsible-section diagnostics-section">
+        <details class="tool-section collapsible-section diagnostics-section legacy-optional-section" aria-hidden="true">
           <summary>
             <span class="summary-icon">＋</span>
             <strong>05 狀態與診斷</strong>
@@ -351,7 +355,7 @@
           </div>
         </section>
 
-        <section class="analysis-panel">
+        <section class="analysis-panel result-focus-panel">
           <div class="result-heading compact-heading">
             <div>
               <p class="eyebrow">AI</p>
@@ -359,7 +363,7 @@
             </div>
             <div class="analysis-meta" id="analysisMeta">未分析</div>
           </div>
-          <div class="feature-panel" id="featurePanel">
+          <div class="feature-panel legacy-ai-detail" id="featurePanel">
             <div class="empty">AI 輸入資料等待中</div>
           </div>
           <div class="ai-progress" id="aiProgress" hidden>
@@ -372,10 +376,10 @@
             </div>
             <div class="ai-progress-detail" id="aiProgressDetail">等待開始</div>
           </div>
-          <div class="validation-panel" id="validationPanel">
+          <div class="validation-panel legacy-ai-detail" id="validationPanel">
             <div class="empty compact-empty">等待 AI 回傳稽核</div>
           </div>
-          <div class="ai-panels">
+          <div class="ai-panels legacy-ai-detail">
             <section class="mini-panel wide-panel">
               <div class="mini-panel-heading">
                 <strong>Top 10 排名</strong>
@@ -433,6 +437,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260823-desktop-ux"></script>
+    <script src="/app.js?v=20261031-titan-auto-select"></script>
   </body>
 </html>

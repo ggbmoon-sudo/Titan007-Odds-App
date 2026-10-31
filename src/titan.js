@@ -535,6 +535,22 @@ function buildAllowedLeagueSet(allowedLeagues = DEFAULT_ALLOWED_LEAGUES) {
   return set;
 }
 
+function defaultAllowedLeagueNames() {
+  const names = new Set();
+  for (const league of DEFAULT_ALLOWED_LEAGUES) {
+    names.add(league);
+    for (const alias of [
+      ...(LEAGUE_ALIASES[league] || []),
+      ...(SUPPLEMENTAL_LEAGUE_ALIASES[league] || []),
+    ]) {
+      names.add(alias);
+    }
+    for (const suffix of LEAGUE_PHASE_SUFFIXES) names.add(`${league}${suffix}`);
+  }
+  for (const league of DEFAULT_ALLOWED_PHASE_LEAGUES) names.add(league);
+  return [...names];
+}
+
 function recordMatchesAllowedLeagues(record, allowedLeagueSet) {
   if (!allowedLeagueSet) return true;
 
@@ -3062,6 +3078,7 @@ async function scanTitanProbabilityEvents(matchItems, options = {}) {
 module.exports = {
   BOOKMAKER_GROUPS,
   DEFAULT_ALLOWED_LEAGUES,
+  defaultAllowedLeagueNames,
   checkTitanConnection,
   extractBatchOdds,
   extractMatchOdds,

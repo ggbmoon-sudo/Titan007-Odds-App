@@ -5,6 +5,7 @@ const { URL } = require("node:url");
 
 const {
   checkTitanConnection,
+  defaultAllowedLeagueNames,
   extractBatchOdds,
   extractMatchOdds,
   fetchLiveMatches,
@@ -311,6 +312,11 @@ const server = http.createServer(async (req, res) => {
         allowedLeagues: includeAllLeagues ? false : undefined,
       });
       sendJson(res, 200, { ok: true, matches });
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/leagues") {
+      sendJson(res, 200, { ok: true, leagueNames: defaultAllowedLeagueNames() });
       return;
     }
 

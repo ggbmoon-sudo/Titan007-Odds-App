@@ -861,6 +861,7 @@ test("parseLiveMatches includes Chile Cup and Brazil Serie B aliases", () => {
     brazilSearch.map((match) => match.matchId),
     ["2503", "2504"]
   );
+
 });
 
 test("parseLiveMatches includes international friendlies and World Cup short names", () => {
